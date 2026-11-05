@@ -37,6 +37,16 @@ enum NotificationStatus {
   FAILED
 }
 
+enum OutboxStatus {
+  PENDING
+  ACCEPTED
+  UNCERTAIN_DISPATCH
+  DELIVERED
+  READ
+  FAILED
+  SUPPRESSED
+}
+
 model Restaurant {
   id                     String                @id @default(uuid()) @db.Uuid
   name                   String                @db.VarChar(255)
@@ -53,30 +63,32 @@ model Restaurant {
   saved_addresses        SavedAddress[]
   webhook_events         WebhookEvent[]
   notifications          OrderNotification[]
+  outbox_messages        OutboxMessage[]
 
   @@map("restaurants")
 }
 
 model Order {
-  id               String              @id @default(uuid()) @db.Uuid
-  restaurant_id    String              @db.Uuid
-  order_reference  String              @unique @db.VarChar(32)
-  customer_name    String?             @db.VarChar(255)
-  customer_phone   String              @db.VarChar(32)
-  address_snapshot String?             @db.Text
-  latitude         Decimal?            @db.Decimal(10, 7)
-  longitude        Decimal?            @db.Decimal(10, 7)
-  order_type       OrderType
-  items            Json                @db.JsonB
-  total_amount     Decimal             @db.Decimal(10, 2)
-  currency         String              @default("INR") @db.Char(3)
-  status           OrderStatus         @default(PENDING_RESTAURANT_CONFIRMATION)
-  decision_at      DateTime?           @db.Timestamptz()
-  created_at       DateTime            @default(now()) @db.Timestamptz()
-  updated_at       DateTime            @updatedAt @db.Timestamptz()
+  id                 String              @id @default(uuid()) @db.Uuid
+  restaurant_id      String              @db.Uuid
+  order_reference    String              @unique @db.VarChar(32)
+  confirmation_token String?             @unique @db.VarChar(128)
+  customer_name      String?             @db.VarChar(255)
+  customer_phone     String              @db.VarChar(32)
+  address_snapshot   String?             @db.Text
+  latitude           Decimal?            @db.Decimal(10, 7)
+  longitude          Decimal?            @db.Decimal(10, 7)
+  order_type         OrderType
+  items              Json                @db.JsonB
+  total_amount       Decimal             @db.Decimal(10, 2)
+  currency           String              @default("INR") @db.Char(3)
+  status             OrderStatus         @default(PENDING_RESTAURANT_CONFIRMATION)
+  decision_at        DateTime?           @db.Timestamptz()
+  created_at         DateTime            @default(now()) @db.Timestamptz()
+  updated_at         DateTime            @updatedAt @db.Timestamptz()
 
-  restaurant       Restaurant          @relation(fields: [restaurant_id], references: [id], onDelete: Restrict)
-  notifications    OrderNotification[]
+  restaurant         Restaurant          @relation(fields: [restaurant_id], references: [id], onDelete: Restrict)
+  notifications      OrderNotification[]
 
   @@unique([id, restaurant_id])
   @@index([restaurant_id, status])
@@ -127,10 +139,15 @@ model WebhookEvent {
   processing_status WebhookStatus @default(RECEIVED)
   received_at       DateTime      @default(now()) @db.Timestamptz()
   processed_at      DateTime?     @db.Timestamptz()
+  claimed_by        String?       @db.VarChar(64)
+  lease_token       String?       @db.Uuid
+  lease_expires_at  DateTime?     @db.Timestamptz()
+  attempt_count     Int           @default(0)
 
   restaurant        Restaurant?   @relation(fields: [restaurant_id], references: [id], onDelete: SetNull)
 
   @@index([processing_status])
+  @@index([processing_status, lease_expires_at])
   @@map("webhook_events")
 }
 
@@ -154,3 +171,23 @@ model OrderNotification {
   @@map("order_notifications")
 }
 
+model OutboxMessage {
+  id              String       @id @default(uuid()) @db.Uuid
+  restaurant_id   String       @db.Uuid
+  recipient_phone String       @db.VarChar(32)
+  message_type    String       @db.VarChar(32)
+  payload         Json         @db.JsonB
+  idempotency_key String       @unique @db.VarChar(128)
+  status          OutboxStatus @default(PENDING)
+  attempts        Int          @default(0)
+  last_error      String?      @db.Text
+  created_at      DateTime     @default(now()) @db.Timestamptz()
+  updated_at      DateTime     @updatedAt @db.Timestamptz()
+
+  restaurant      Restaurant   @relation(fields: [restaurant_id], references: [id], onDelete: Cascade)
+
+  @@index([status, created_at])
+  @@index([restaurant_id, status])
+  @@index([restaurant_id, created_at])
+  @@map("outbox_messages")
+}

@@ -1,0 +1,71 @@
+# RESTOPRO — Render Infrastructure Blueprint Specification
+# Blueprint Version: 1.0.0
+# Reference: https://render.com/docs/blueprint-spec
+
+services:
+  # ---------------------------------------------------------------------------
+  # 1. Web Service: RESTOPRO Express API & Meta WhatsApp Webhook Ingestion
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: restopro-api
+    runtime: node
+    plan: starter # Starter plan prevents 15-min idle spin-down which fails Meta's 5s webhook timeout
+    region: frankfurt # Low-latency European location (or oregon/ohio/singapore)
+    buildCommand: npm install && npx prisma generate
+    preDeployCommand: npx prisma migrate deploy # Automatically applies migrations before serving traffic
+    startCommand: node src/server.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        fromDatabase:
+          name: restopro-postgres
+          property: connectionString
+      - key: META_WEBHOOK_VERIFY_TOKEN
+        sync: false # Set manually in Render dashboard to protect secret
+      - key: META_APP_SECRET
+        sync: false # Set manually in Render dashboard to protect secret
+      - key: META_API_VERSION
+        value: v21.0
+      - key: LOG_LEVEL
+        value: info
+
+  # ---------------------------------------------------------------------------
+  # 2. Background Worker: Outbox Dispatcher, Retries & Periodic Maintenance
+  # ---------------------------------------------------------------------------
+  - type: worker
+    name: restopro-worker
+    runtime: node
+    plan: starter # Dedicated worker process with persistent background CPU
+    region: frankfurt
+    buildCommand: npm install && npx prisma generate
+    startCommand: node src/jobs/notification-worker.js
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: restopro-postgres
+          property: connectionString
+      - key: POLL_INTERVAL_MS
+        value: 2000
+      - key: OUTBOX_BATCH_SIZE
+        value: 10
+      - key: LOG_LEVEL
+        value: info
+
+# -----------------------------------------------------------------------------
+# 3. Managed Database: PostgreSQL 16 Multi-Tenant Instance
+# -----------------------------------------------------------------------------
+databases:
+  - name: restopro-postgres
+    databaseName: restopro
+    user: restopro_user
+    plan: starter # Starter plan includes automated daily backups and persistent storage (avoids 30-day free tier deletion)
+    region: frankfurt
+    postgresMajorVersion: 16

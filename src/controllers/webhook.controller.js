@@ -1,10 +1,13 @@
 /**
  * RESTOPRO — Webhook Controller
- * Orchestrates verification challenges and durable event ingestion into PostgreSQL.
+ * Orchestrates verification challenges, durable event ingestion, and conversation routing.
  */
 const { verifyWebhookChallenge } = require('../middleware/verifyWebhook');
 const { parseWebhookPayload } = require('../parsers/webhook-parser');
-const { recordIncomingEvent, markEventCompleted } = require('../services/webhook.service');
+const { recordIncomingEvent, markEventCompleted, markEventFailed } = require('../services/webhook.service');
+const { resolveTenantByPhoneNumberId } = require('../services/tenant.service');
+const { handleIncomingMessage } = require('../services/conversation.service');
+const { processOwnerOrderDecision } = require('../services/order.service');
 const logger = require('../utils/logger');
 
 /**
@@ -23,6 +26,7 @@ function handleGetVerification(req, res) {
  * Webhook Reliability Contract:
  * - Persists incoming events to PostgreSQL BEFORE acknowledging with HTTP 200.
  * - Detects and deduplicates retried webhooks via event_key.
+ * - Dispatches customer messages to conversation.service.js for deterministic state updates.
  * - If database persistence fails, returns HTTP 500 so Meta automatically retries delivery.
  */
 async function handleIncomingEvent(req, res) {
@@ -69,11 +73,85 @@ async function handleIncomingEvent(req, res) {
           messageType: event.messageType
         });
 
-        // Stage 2: Event is durably recorded in PostgreSQL.
-        // Stage 3 & 4 will connect this to the conversation and order state machines.
+        // Resolve tenant context exclusively via Meta incoming phone_number_id
+        const tenant = event.phoneNumberId
+          ? await resolveTenantByPhoneNumberId(event.phoneNumberId)
+          : null;
+
+        if (!tenant) {
+          logger.warn('Message received for unmapped or inactive tenant', {
+            phoneNumberId: event.phoneNumberId
+          });
+          if (eventRecord) {
+            await markEventFailed(eventRecord.id, 'Tenant not resolved or inactive');
+          }
+          continue;
+        }
+
+        // Check if message is an owner interactive action (e.g. OWNER_ACCEPT:<id> or OWNER_REJECT:<id>)
+        const actionPayload = event.interactiveReply?.id || event.buttonReply?.payload || null;
+        if (actionPayload && typeof actionPayload === 'string' && actionPayload.startsWith('OWNER_')) {
+          logger.info('Received owner decision interactive payload', {
+            phoneNumberId: event.phoneNumberId,
+            senderPhone: event.senderPhone,
+            payload: actionPayload
+          });
+
+          const decisionResult = await processOwnerOrderDecision({
+            restaurantId: tenant.id,
+            senderPhone: event.senderPhone,
+            buttonPayload: actionPayload
+          });
+
+          if (!decisionResult.success) {
+            logger.warn('Owner decision rejected', {
+              phoneNumberId: event.phoneNumberId,
+              senderPhone: event.senderPhone,
+              code: decisionResult.code,
+              error: decisionResult.error
+            });
+            if (eventRecord) {
+              await markEventFailed(eventRecord.id, `Owner decision rejected: ${decisionResult.error}`);
+            }
+            continue;
+          }
+
+          logger.info('Owner decision processed successfully', {
+            orderId: decisionResult.order?.id,
+            orderReference: decisionResult.order?.order_reference,
+            status: decisionResult.order?.status,
+            isDuplicate: decisionResult.isDuplicate || false
+          });
+
+          if (eventRecord) {
+            await markEventCompleted(eventRecord.id);
+          }
+          continue;
+        }
+
+        // Dispatch incoming customer message to the conversation engine
+        const engineResult = await handleIncomingMessage(
+          tenant.id,
+          event.senderPhone,
+          event
+        );
+
+        if (!engineResult.success) {
+          logger.warn('Conversation engine rejected message', {
+            senderPhone: event.senderPhone,
+            code: engineResult.code,
+            error: engineResult.error
+          });
+          if (eventRecord) {
+            await markEventFailed(eventRecord.id, `Engine error: ${engineResult.error}`);
+          }
+          continue;
+        }
+
         if (eventRecord) {
           await markEventCompleted(eventRecord.id);
         }
+        continue;
       }
     }
 

@@ -8,8 +8,23 @@ const logger = require('./utils/logger');
 
 const app = express();
 
-// Capture raw body buffer for HMAC-SHA256 signature verification
+// Trust Render / cloud reverse proxy front-end (1 hop)
+app.set('trust proxy', 1);
+
+// Disable Express fingerprinting header for security hardening
+app.disable('x-powered-by');
+
+// Standard HTTP security defense headers
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  next();
+});
+
+// Capture raw body buffer for HMAC-SHA256 signature verification with bounded 1MB payload limit
 app.use(express.json({
+  limit: '1mb',
   verify: (req, res, buf) => {
     req.rawBody = buf;
   }
@@ -56,6 +71,12 @@ app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
     logger.warn('Malformed JSON request body received', { error: err.message });
     return res.status(400).json({ error: 'Malformed JSON payload' });
+  }
+
+  // Handle oversized request payloads gracefully with HTTP 413
+  if (err.type === 'entity.too.large' || err.status === 413) {
+    logger.warn('Oversized request body rejected', { limit: err.limit });
+    return res.status(413).json({ error: 'Payload too large. Maximum allowed size is 1MB.' });
   }
 
   logger.error('Unhandled server error', { error: err.message, stack: err.stack });

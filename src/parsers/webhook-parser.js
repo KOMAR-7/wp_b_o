@@ -171,7 +171,8 @@ function parseMessageDetails(type, message) {
           calculatedSubtotal: Math.round(calculatedSubtotal * 100) / 100,
           currency: primaryCurrency || 'INR',
           currencyMismatch: hasCurrencyMismatch
-        }
+        },
+        rawOrder: message.order
       };
     }
 

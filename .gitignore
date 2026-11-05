@@ -26,3 +26,8 @@ Thumbs.db
 # Temporary test/scratch files
 scratch/
 test-output/
+
+# Database Backups
+backups/
+*.dump
+

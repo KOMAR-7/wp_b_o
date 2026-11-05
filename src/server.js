@@ -6,7 +6,7 @@ const config = require('./config/env');
 const logger = require('./utils/logger');
 const prisma = require('./config/database');
 
-const server = app.listen(config.port, () => {
+const server = app.listen(config.port, '0.0.0.0', () => {
   logger.info(`RESTOPRO Backend listening on port ${config.port}`, {
     environment: config.nodeEnv,
     port: config.port,

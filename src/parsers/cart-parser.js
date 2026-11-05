@@ -1,0 +1,259 @@
+/**
+ * RESTOPRO — WhatsApp Catalogue Cart Parser & Defensive Validator
+ * Stage 4.1: Cart Processing Engine
+ *
+ * Implements strict, defensive validation of Meta WhatsApp `type: "order"` payloads.
+ * Uses integer-cents arithmetic for decimal safety (no floating-point rounding errors).
+ * Rejects corrupt or malformed cart data without silent coercion.
+ */
+
+class CartValidationError extends Error {
+  constructor(code, message, details = {}) {
+    super(message);
+    this.name = 'CartValidationError';
+    this.code = code;
+    this.details = details;
+  }
+}
+
+/**
+ * Converts a monetary amount to integer cents/paise to avoid IEEE 754 floating-point errors.
+ * e.g., 240.50 -> 24050, "15.99" -> 1599.
+ *
+ * @param {number|string} amount
+ * @returns {number} Integer cents
+ */
+function toIntegerCents(amount) {
+  if (typeof amount === 'number') {
+    if (isNaN(amount) || !isFinite(amount)) {
+      throw new Error('Non-finite numeric amount');
+    }
+    return Math.round(amount * 100);
+  }
+
+  if (typeof amount === 'string') {
+    const trimmed = amount.trim();
+    if (!trimmed || isNaN(Number(trimmed))) {
+      throw new Error(`Non-numeric amount string: "${amount}"`);
+    }
+    const parsed = parseFloat(trimmed);
+    if (!isFinite(parsed)) {
+      throw new Error(`Non-finite amount string: "${amount}"`);
+    }
+    return Math.round(parsed * 100);
+  }
+
+  throw new Error(`Unsupported amount type: ${typeof amount}`);
+}
+
+/**
+ * Converts integer cents back to formatted decimal currency number (2 decimal places).
+ * e.g., 24050 -> 240.50
+ *
+ * @param {number} cents
+ * @returns {number}
+ */
+function fromIntegerCents(cents) {
+  return Number((cents / 100).toFixed(2));
+}
+
+/**
+ * Validates whether a value is a valid strictly positive integer.
+ * e.g., 1, 2, 99 are valid. 0, -1, 1.5, "abc", NaN are invalid.
+ *
+ * @param {*} val
+ * @returns {boolean}
+ */
+function isPositiveInteger(val) {
+  if (typeof val === 'number') {
+    return Number.isInteger(val) && val > 0;
+  }
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    // Must be digits only and > 0
+    if (/^\d+$/.test(trimmed)) {
+      const parsed = parseInt(trimmed, 10);
+      return parsed > 0;
+    }
+    return false;
+  }
+  return false;
+}
+
+/**
+ * Parses, validates, and normalizes an incoming WhatsApp catalogue order object.
+ *
+ * Expected Meta payload structure:
+ * {
+ *   catalog_id: "...",
+ *   text: "optional customer note",
+ *   product_items: [
+ *     {
+ *       product_retailer_id: "SKU_123",
+ *       quantity: 2,
+ *       item_price: 240.00,
+ *       currency: "INR"
+ *     }
+ *   ]
+ * }
+ *
+ * @param {Object} rawOrder - Raw `order` object from Meta WhatsApp message
+ * @returns {{isValid: boolean, cart?: Object, error?: string, code?: string, details?: Object}}
+ */
+function parseAndValidateCart(rawOrder) {
+  if (!rawOrder || typeof rawOrder !== 'object') {
+    return {
+      isValid: false,
+      code: 'MALFORMED_ORDER_OBJECT',
+      error: 'Order payload must be a non-null object'
+    };
+  }
+
+  const catalogId = typeof rawOrder.catalog_id === 'string' && rawOrder.catalog_id.trim()
+    ? rawOrder.catalog_id.trim()
+    : null;
+
+  const customerNote = typeof rawOrder.text === 'string'
+    ? rawOrder.text.trim()
+    : '';
+
+  const rawItems = rawOrder.product_items;
+
+  // 1. Validate cart items array exists and is not empty
+  if (!Array.isArray(rawItems) || rawItems.length === 0) {
+    return {
+      isValid: false,
+      code: 'CART_EMPTY',
+      error: 'Cart contains no items. At least one item is required.'
+    };
+  }
+
+  let cartSubtotalCents = 0;
+  let totalItemCount = 0;
+  let primaryCurrency = null;
+  const normalizedItems = [];
+
+  for (let index = 0; index < rawItems.length; index++) {
+    const item = rawItems[index];
+
+    if (!item || typeof item !== 'object') {
+      return {
+        isValid: false,
+        code: 'MALFORMED_ITEM',
+        error: `Item at index ${index} is not an object`
+      };
+    }
+
+    // 2. Validate product_retailer_id
+    const retailerId = typeof item.product_retailer_id === 'string'
+      ? item.product_retailer_id.trim()
+      : '';
+
+    if (!retailerId) {
+      return {
+        isValid: false,
+        code: 'MISSING_PRODUCT_ID',
+        error: `Item at index ${index} is missing a valid product_retailer_id`
+      };
+    }
+
+    // 3. Strict Quantity Validation: Positive integer only (no decimals, zero, or negatives)
+    if (!isPositiveInteger(item.quantity)) {
+      return {
+        isValid: false,
+        code: 'INVALID_QUANTITY',
+        error: `Item "${retailerId}" has invalid quantity: ${JSON.stringify(item.quantity)}. Quantity must be a positive integer.`
+      };
+    }
+    const quantity = typeof item.quantity === 'number'
+      ? item.quantity
+      : parseInt(item.quantity.trim(), 10);
+
+    // 4. Strict Price Validation: Valid non-negative finite number (0.00 is allowed, negatives are rejected)
+    let unitPriceCents;
+    try {
+      unitPriceCents = toIntegerCents(item.item_price);
+      if (unitPriceCents < 0) {
+        return {
+          isValid: false,
+          code: 'NEGATIVE_PRICE',
+          error: `Item "${retailerId}" has negative price: ${item.item_price}. Prices cannot be negative.`
+        };
+      }
+    } catch (priceErr) {
+      return {
+        isValid: false,
+        code: 'INVALID_PRICE',
+        error: `Item "${retailerId}" has invalid price: ${JSON.stringify(item.item_price)}. ${priceErr.message}`
+      };
+    }
+
+    // 5. Strict Currency Validation & Consistency
+    const currencyStr = typeof item.currency === 'string'
+      ? item.currency.trim().toUpperCase()
+      : '';
+
+    if (!currencyStr || currencyStr.length !== 3) {
+      return {
+        isValid: false,
+        code: 'INVALID_CURRENCY',
+        error: `Item "${retailerId}" is missing a valid 3-letter ISO currency code`
+      };
+    }
+
+    if (!primaryCurrency) {
+      primaryCurrency = currencyStr;
+    } else if (currencyStr !== primaryCurrency) {
+      return {
+        isValid: false,
+        code: 'CURRENCY_MISMATCH',
+        error: `Currency conflict detected: Cart uses "${primaryCurrency}", but item "${retailerId}" specified "${currencyStr}". All items must share identical currency.`
+      };
+    }
+
+    // 6. Decimal-Safe Line Total Arithmetic
+    const lineTotalCents = unitPriceCents * quantity;
+    cartSubtotalCents += lineTotalCents;
+    totalItemCount += quantity;
+
+    // 7. SKU Display Fallback: Never invent names, fallback to product_retailer_id
+    const displayName = (typeof item.name === 'string' && item.name.trim())
+      ? item.name.trim()
+      : retailerId;
+
+    normalizedItems.push({
+      productRetailerId: retailerId,
+      productName: displayName,
+      quantity,
+      unitPrice: fromIntegerCents(unitPriceCents),
+      currency: currencyStr,
+      subtotal: fromIntegerCents(lineTotalCents)
+    });
+  }
+
+  // 8. Construct Normalized Cart Envelope
+  const normalizedCart = {
+    catalogId,
+    customerNote,
+    currency: primaryCurrency,
+    itemCount: totalItemCount,
+    distinctItemCount: normalizedItems.length,
+    subtotal: fromIntegerCents(cartSubtotalCents),
+    items: normalizedItems,
+    rawOrderSnapshot: rawOrder // Untrusted submitted snapshot preserved for audit
+  };
+
+  return {
+    isValid: true,
+    cart: normalizedCart
+  };
+}
+
+module.exports = {
+  CartValidationError,
+  parseAndValidateCart,
+  toIntegerCents,
+  fromIntegerCents,
+  isPositiveInteger
+};
+
