@@ -202,3 +202,4 @@ To restore a snapshot into a new database:
 ```bash
 pg_restore --clean --if-exists --no-owner --no-privileges -d "<TARGET_DATABASE_URL>?sslmode=require" ./backups/restopro_backup_YYYYMMDD_HHMMSS.dump
 ```
+

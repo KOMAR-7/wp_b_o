@@ -69,3 +69,4 @@ databases:
     plan: starter # Starter plan includes automated daily backups and persistent storage (avoids 30-day free tier deletion)
     region: frankfurt
     postgresMajorVersion: 16
+

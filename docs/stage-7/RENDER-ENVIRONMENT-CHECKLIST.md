@@ -58,3 +58,4 @@ Before directing live customer traffic to Render:
 - [ ] Test restaurant records seeded with valid credentials in PostgreSQL.
 - [ ] Render PostgreSQL plan is Starter or higher (persistent storage and daily backups active).
 - [ ] Meta Webhook verified and subscribed to `messages` field.
+

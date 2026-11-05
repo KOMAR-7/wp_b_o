@@ -55,3 +55,4 @@ echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] Pruning backups older than ${RETENTION_
 find "${BACKUP_DIR}" -name "restopro_backup_*.dump" -type f -mtime "+${RETENTION_DAYS}" -exec rm -f {} \;
 
 echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] Backup routine completed successfully." | tee -a "${LOG_FILE}"
+
