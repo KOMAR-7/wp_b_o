@@ -3,6 +3,7 @@
  */
 
 const SENSITIVE_KEYS = [
+  'token',
   'appsecret',
   'app_secret',
   'accesstoken',
@@ -11,7 +12,9 @@ const SENSITIVE_KEYS = [
   'verify_token',
   'authorization',
   'password',
-  'secret'
+  'secret',
+  'signature',
+  'x-hub-signature-256'
 ];
 
 /**
@@ -58,7 +61,10 @@ const logger = {
     if (process.env.NODE_ENV !== 'production') {
       console.log(formatLog('debug', message, context));
     }
-  }
+  },
+  // Exported helpers for testing & direct sanitization
+  sanitizeForLogging,
+  formatLog
 };
 
 module.exports = logger;

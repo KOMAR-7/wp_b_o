@@ -1,7 +1,19 @@
 /**
  * RESTOPRO — Meta WhatsApp Cloud API Webhook Event Parser
- * Safely parses and normalizes incoming Meta payloads.
+ * Safely parses and normalizes incoming Meta payloads with defensive numeric handling.
  */
+
+/**
+ * Safely parses coordinate float, preserving 0.0 values without falsy coercion.
+ */
+function safeParseCoordinate(val) {
+  if (typeof val === 'number' && !isNaN(val)) return val;
+  if (typeof val === 'string' && val.trim() !== '') {
+    const parsed = parseFloat(val);
+    if (!isNaN(parsed)) return parsed;
+  }
+  return null;
+}
 
 /**
  * Extracts and parses all actionable messages from an incoming Meta webhook body.
@@ -104,7 +116,7 @@ function parseMessageDetails(type, message) {
     case 'text': {
       const textObj = message.text || {};
       return {
-        text: textObj.body || ''
+        text: typeof textObj.body === 'string' ? textObj.body : ''
       };
     }
 
@@ -112,22 +124,37 @@ function parseMessageDetails(type, message) {
       // Native WhatsApp Catalog Order / Cart submission
       const orderObj = message.order || {};
       const catalogId = orderObj.catalog_id || null;
-      const customerNotes = orderObj.text || '';
+      const customerNotes = typeof orderObj.text === 'string' ? orderObj.text : '';
       const rawItems = Array.isArray(orderObj.product_items) ? orderObj.product_items : [];
 
       let calculatedSubtotal = 0;
-      let orderCurrency = 'INR';
+      let primaryCurrency = null;
+      let hasCurrencyMismatch = false;
 
       const items = rawItems.map(item => {
-        const quantity = parseInt(item.quantity || 1, 10);
-        const unitPrice = parseFloat(item.item_price || 0);
-        const currency = item.currency || 'INR';
-        orderCurrency = currency;
-        const lineTotal = quantity * unitPrice;
+        const rawQty = parseInt(item.quantity, 10);
+        const quantity = (!isNaN(rawQty) && rawQty > 0) ? rawQty : 1;
+
+        const rawPrice = parseFloat(item.item_price);
+        const unitPrice = (!isNaN(rawPrice) && rawPrice >= 0)
+          ? Math.round(rawPrice * 100) / 100
+          : 0;
+
+        const currency = (typeof item.currency === 'string' && item.currency.trim())
+          ? item.currency.trim().toUpperCase()
+          : 'INR';
+
+        if (!primaryCurrency) {
+          primaryCurrency = currency;
+        } else if (currency !== primaryCurrency) {
+          hasCurrencyMismatch = true;
+        }
+
+        const lineTotal = Math.round(quantity * unitPrice * 100) / 100;
         calculatedSubtotal += lineTotal;
 
         return {
-          productRetailerId: item.product_retailer_id || '',
+          productRetailerId: typeof item.product_retailer_id === 'string' ? item.product_retailer_id : '',
           quantity,
           unitPrice,
           currency,
@@ -142,7 +169,8 @@ function parseMessageDetails(type, message) {
           itemCount: items.length,
           items,
           calculatedSubtotal: Math.round(calculatedSubtotal * 100) / 100,
-          currency: orderCurrency
+          currency: primaryCurrency || 'INR',
+          currencyMismatch: hasCurrencyMismatch
         }
       };
     }
@@ -152,10 +180,10 @@ function parseMessageDetails(type, message) {
       const locObj = message.location || {};
       return {
         location: {
-          latitude: typeof locObj.latitude === 'number' ? locObj.latitude : parseFloat(locObj.latitude) || null,
-          longitude: typeof locObj.longitude === 'number' ? locObj.longitude : parseFloat(locObj.longitude) || null,
-          name: locObj.name || null,
-          address: locObj.address || null
+          latitude: safeParseCoordinate(locObj.latitude),
+          longitude: safeParseCoordinate(locObj.longitude),
+          name: typeof locObj.name === 'string' ? locObj.name : null,
+          address: typeof locObj.address === 'string' ? locObj.address : null
         }
       };
     }
@@ -166,9 +194,9 @@ function parseMessageDetails(type, message) {
       const contextObj = message.context || {};
       return {
         buttonReply: {
-          payload: buttonObj.payload || '',
-          text: buttonObj.text || '',
-          contextMessageId: contextObj.id || null
+          payload: typeof buttonObj.payload === 'string' ? buttonObj.payload : '',
+          text: typeof buttonObj.text === 'string' ? buttonObj.text : '',
+          contextMessageId: typeof contextObj.id === 'string' ? contextObj.id : null
         }
       };
     }
@@ -183,8 +211,8 @@ function parseMessageDetails(type, message) {
         return {
           interactiveReply: {
             subType: 'button_reply',
-            id: reply.id || '',
-            title: reply.title || ''
+            id: typeof reply.id === 'string' ? reply.id : '',
+            title: typeof reply.title === 'string' ? reply.title : ''
           }
         };
       }
@@ -194,9 +222,9 @@ function parseMessageDetails(type, message) {
         return {
           interactiveReply: {
             subType: 'list_reply',
-            id: reply.id || '',
-            title: reply.title || '',
-            description: reply.description || null
+            id: typeof reply.id === 'string' ? reply.id : '',
+            title: typeof reply.title === 'string' ? reply.title : '',
+            description: typeof reply.description === 'string' ? reply.description : null
           }
         };
       }
@@ -220,5 +248,6 @@ function parseMessageDetails(type, message) {
 
 module.exports = {
   parseWebhookPayload,
-  parseMessageDetails
+  parseMessageDetails,
+  safeParseCoordinate
 };

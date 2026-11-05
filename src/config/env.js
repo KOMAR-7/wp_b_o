@@ -20,22 +20,25 @@ const config = {
 /**
  * Validates that critical environment variables exist.
  * Warns if secrets are missing during development.
+ * Throws in production.
  */
-function validateConfig() {
+function validateConfig(testConfig = config) {
   const missing = [];
-  if (!config.meta.verifyToken) missing.push('META_VERIFY_TOKEN');
-  if (!config.meta.appSecret) missing.push('META_APP_SECRET');
+  if (!testConfig.meta.verifyToken) missing.push('META_VERIFY_TOKEN');
+  if (!testConfig.meta.appSecret) missing.push('META_APP_SECRET');
 
   if (missing.length > 0) {
-    if (config.nodeEnv === 'production') {
+    if (testConfig.nodeEnv === 'production') {
       throw new Error(`[CONFIG ERROR] Missing required environment variables in production: ${missing.join(', ')}`);
     } else {
       console.warn(`[CONFIG WARNING] Missing configuration keys for live Meta integration: ${missing.join(', ')}.`);
-      console.warn('[CONFIG WARNING] Please update .env with your Meta App credentials to connect to real WhatsApp Cloud API.');
     }
   }
+  return missing;
 }
 
 validateConfig();
+
+config.validateConfig = validateConfig;
 
 module.exports = config;

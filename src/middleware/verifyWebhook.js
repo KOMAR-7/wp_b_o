@@ -5,12 +5,12 @@ const crypto = require('crypto');
 const config = require('../config/env');
 const logger = require('../utils/logger');
 
+const HEX_64_REGEX = /^[0-9a-fA-F]{64}$/;
+
 /**
  * Handles Meta Webhook Verification Challenge (HTTP GET).
- * Meta sends:
- *  - hub.mode = 'subscribe'
- *  - hub.verify_token = '<your_configured_verify_token>'
- *  - hub.challenge = '<random_challenge_string>'
+ * Uses SHA-256 digest hashing before timingSafeEqual to eliminate length-leakage attacks
+ * and guarantee identical buffer lengths.
  */
 function verifyWebhookChallenge(req, res) {
   const mode = req.query['hub.mode'];
@@ -35,13 +35,11 @@ function verifyWebhookChallenge(req, res) {
     return res.status(500).send('Server verify token unconfigured');
   }
 
-  // Constant-time string comparison to prevent timing attacks
-  const tokenBuffer = Buffer.from(token);
-  const expectedBuffer = Buffer.from(expectedToken);
+  // Hash both strings to SHA-256 digests (always 32 bytes) for constant-time comparison
+  const tokenHash = crypto.createHash('sha256').update(String(token)).digest();
+  const expectedHash = crypto.createHash('sha256').update(String(expectedToken)).digest();
 
-  const isMatch =
-    tokenBuffer.length === expectedBuffer.length &&
-    crypto.timingSafeEqual(tokenBuffer, expectedBuffer);
+  const isMatch = crypto.timingSafeEqual(tokenHash, expectedHash);
 
   if (isMatch) {
     logger.info('Meta webhook verification handshake successful');
@@ -54,7 +52,7 @@ function verifyWebhookChallenge(req, res) {
 
 /**
  * Validates Meta's HMAC-SHA256 signature on incoming webhook events (HTTP POST).
- * Header: x-hub-signature-256 = sha256=<hex_digest>
+ * Header: x-hub-signature-256 = sha256=<64_hex_digits>
  */
 function verifyWebhookSignature(req, res, next) {
   const signature = req.headers['x-hub-signature-256'];
@@ -77,11 +75,15 @@ function verifyWebhookSignature(req, res, next) {
   }
 
   const receivedHash = parts[1];
-  const rawBody = req.rawBody;
+  if (!HEX_64_REGEX.test(receivedHash)) {
+    logger.warn('Webhook signature verification rejected: signature digest is not a valid 64-char hex string');
+    return res.status(400).json({ error: 'Invalid signature digest format' });
+  }
 
+  const rawBody = req.rawBody;
   if (!rawBody || !Buffer.isBuffer(rawBody)) {
-    logger.error('Webhook signature verification failed: rawBody buffer not preserved by parser');
-    return res.status(500).json({ error: 'Raw body buffer missing' });
+    logger.warn('Webhook signature verification rejected: missing or invalid request body buffer');
+    return res.status(400).json({ error: 'Missing request body buffer' });
   }
 
   const computedHash = crypto

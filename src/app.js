@@ -52,6 +52,12 @@ app.use((req, res) => {
 
 // Global Error Handler
 app.use((err, req, res, next) => {
+  // Handle client-sent malformed JSON syntax errors gracefully with HTTP 400
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    logger.warn('Malformed JSON request body received', { error: err.message });
+    return res.status(400).json({ error: 'Malformed JSON payload' });
+  }
+
   logger.error('Unhandled server error', { error: err.message, stack: err.stack });
   res.status(500).json({ error: 'Internal server error' });
 });
