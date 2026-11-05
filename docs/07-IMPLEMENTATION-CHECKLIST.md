@@ -72,8 +72,8 @@
   *Acceptance Criterion:* Verified in `test/stage2-database-test.js` (P2002 on unique violations, P2003 on invalid FKs, Restrict on active orders).
 - [x] **ST3-07:** Enforce composite foreign key on `order_notifications(order_id, restaurant_id)` referencing `orders(id, restaurant_id)`.  
   *Acceptance Criterion:* Verified via migration `20261105121500_enforce_notification_tenant_consistency` and `test/stage2-database-test.js` (matching insert succeeds, mismatched insert rejected with P2003).
-- [x] **ST3-08:** Configure connection pool capacity parameters and graceful shutdown lifecycle.  
-  *Acceptance Criterion:* Verified: PostgreSQL `max_connections = 100`, `connection_limit = 10` per worker budgeted for Hostinger VPS PM2 cluster, and graceful shutdown tested in `test/stage2-database-test.js`.
+- [x] **ST3-08:** Configure connection pool capacity parameters and verify graceful shutdown lifecycle.  
+  *Acceptance Criterion:* Verified: Local PostgreSQL `max_connections = 100` inspected; production capacity budgeted; child process signal-triggered graceful shutdown verified in `test/graceful-shutdown-test.js` (stops accepting requests, disconnects Prisma, and releases port cleanly).
 
 ---
 

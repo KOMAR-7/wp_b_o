@@ -8,6 +8,7 @@
     "dev": "nodemon src/server.js",
     "test:webhook": "node test/webhook-test.js",
     "test:stage2": "node test/stage2-database-test.js",
+    "test:shutdown": "node test/graceful-shutdown-test.js",
     "db:seed": "node prisma/seed.js"
   },
   "prisma": {

@@ -17,6 +17,12 @@ const server = app.listen(config.port, () => {
 
 async function gracefulShutdown(signal) {
   logger.info(`Received ${signal}. Shutting down HTTP server gracefully...`);
+
+  // Close idle keep-alive connections if supported (Node.js 18.2+)
+  if (typeof server.closeIdleConnections === 'function') {
+    server.closeIdleConnections();
+  }
+
   server.close(async () => {
     try {
       await prisma.$disconnect();
@@ -32,10 +38,15 @@ async function gracefulShutdown(signal) {
   setTimeout(() => {
     logger.error('Forceful shutdown triggered after 10s timeout.');
     process.exit(1);
-  }, 10000);
+  }, 10000).unref();
 }
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('message', (msg) => {
+  if (msg === 'shutdown' || msg === 'SIGTERM') {
+    gracefulShutdown('PM2_SHUTDOWN');
+  }
+});
 
 module.exports = server;

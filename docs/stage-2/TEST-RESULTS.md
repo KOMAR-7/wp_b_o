@@ -4,9 +4,10 @@
 **Test Suites Executed:**
 1. `test/stage2-database-test.js` (59 assertions across 13 test groups)
 2. `test/webhook-test.js` (86 assertions across 10 test groups)  
-**Total Passed:** 145  
+3. `test/graceful-shutdown-test.js` (6 assertions in isolated child process)  
+**Total Passed:** 151  
 **Total Failed:** 0  
-**Overall Status:** 100% Passing    
+**Overall Status:** 100% Passing  
 
 ---
 
@@ -128,7 +129,21 @@ Executing `npm run test:webhook`:
 
 ---
 
-## 3. Key Invariants Formally Verified
+## 3. Dedicated Graceful Shutdown Child Process Test Suite (`test/graceful-shutdown-test.js`)
+
+Executing `npm run test:shutdown`:
+- **Operational Handling:** Server boots and successfully processes HTTP GET /health request.
+- **Signal Reception:** Genuine process signal handler is triggered on SIGTERM (`Received SIGTERM...`).
+- **Connection Draining:** HTTP server closes and ceases accepting new connections.
+- **Prisma Teardown:** Prisma database client terminates connection pool cleanly without hanging.
+- **Process Termination:** Child process exits with status code 0 (clean exit).
+- **Socket / Port Release:** Port 3991 is verified released (subsequent connections refused with `ECONNREFUSED`).
+
+*Graceful Shutdown Result: 6 Passed, 0 Failed.*
+
+---
+
+## 4. Key Invariants Formally Verified
 
 1. **Zero Cross-Tenant Leakage:** An order created for Tenant B cannot be read by Tenant A, even if the order ID is known.
 2. **Customer Identity Separation:** The same customer phone number ordering from both Restaurant A and Restaurant B simultaneously receives two completely separate `conversation_sessions` and distinct address books in `saved_addresses`.

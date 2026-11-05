@@ -117,32 +117,36 @@ npm run db:seed
 
 ---
 
-## 7. Connection Pool & Hostinger VPS Capacity Planning
+## 7. Connection Pool: Local Verification vs. Future Production Sizing
 
-### 7.1 PostgreSQL Server Ceiling
-PostgreSQL default configuration provides:
-```sql
-SHOW max_connections; -- 100
-```
-On typical Hostinger Ubuntu VPS setups (2 to 4 vCPUs, 8 GB RAM), increasing `max_connections` excessively causes excessive memory consumption per backend connection process (Postgres spawns a dedicated process per connection). A ceiling of 100 connections is standard and safe.
+### 7.1 Locally Verified Configuration (Current Active State)
+* **Local Database Engine:** PostgreSQL 18.x running on `localhost:5432`.
+* **Verified Server Max Connections:**
+  ```sql
+  SHOW max_connections; -- Returns 100
+  ```
+* **Active Development Connection String (`.env`):**
+  ```env
+  DATABASE_URL="postgresql://postgres:admin@localhost:5432/restopro_dev?schema=public"
+  ```
+* **Active Process Architecture:** A single Node.js process runs Express and Prisma Client.
+* **Prisma Default Pool Behavior:** Without an explicit `connection_limit` query parameter, Prisma Client opens a pool sized at `(num_physical_cpus * 2) + 1`. In local development on a single instance, this consumes approximately 5–17 connections under load, safely below the local PostgreSQL ceiling of 100 connections.
 
-### 7.2 Connection Budget Breakdown
-When running under PM2 cluster mode in Stage 8:
-* **Web Server Instances:** 4 PM2 cluster workers.
-* **Per-Worker Connection Limit:** `connection_limit = 10`.
-* **Peak Web Traffic Utilization:** $4 \times 10 = 40$ connections.
-* **Background Jobs (Stage 7):**
-  * `notification-worker.js`: 5 connections.
-  * `session-cleanup.js`: 5 connections.
-* **Total Application Peak Utilization:** 50 connections (50% of server capacity).
-* **Headroom Remaining:** 50 connections reserved for administrative `psql` sessions, automated backups (`pg_dump`), Prisma migrations, and transient connection bursts.
+### 7.2 Proposed Production Capacity Model (Hostinger VPS Stage 8 Planning)
+> [!NOTE]
+> The following parameters are **theoretical architectural sizing targets** for future Stage 7 (workers) and Stage 8 (VPS PM2 deployment). They are **NOT** currently deployed, active, or verified in the local environment.
 
-### 7.3 Configured Connection String
-In `.env` and `.env.example`:
-```env
-DATABASE_URL="postgresql://postgres:admin@localhost:5432/restopro_dev?schema=public&connection_limit=10&pool_timeout=20"
-```
-* `connection_limit=10`: Restricts this Prisma Client process to a maximum of 10 simultaneous pooled connections.
-* `pool_timeout=20`: Specifies a 20-second timeout to acquire a connection from the pool before rejecting the query with a timeout error.
+When deploying to Hostinger Ubuntu VPS with PM2 cluster mode:
+* **Proposed Web Server Model:** 4 PM2 cluster worker processes.
+* **Recommended Production Query String:**
+  ```env
+  DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/DB?schema=public&connection_limit=10&pool_timeout=20"
+  ```
+* **Proposed Connection Budget Breakdown:**
+  * 4 PM2 web workers $\times$ 10 connections = 40 peak active connections.
+  * Future Stage 7 background workers (`notification-worker.js`, `session-cleanup.js`) = ~10 connections.
+  * Total planned application peak = 50 connections (50% of the standard 100 `max_connections` ceiling).
+  * Remaining 50 connections reserved for migrations, `pg_dump` backups, and administrative access.
+
 
 
