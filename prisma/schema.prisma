@@ -1,0 +1,154 @@
+// RESTOPRO — Multi-Tenant PostgreSQL Schema
+// Powered by Prisma ORM
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum OrderType {
+  DELIVERY
+  TAKEAWAY
+}
+
+enum OrderStatus {
+  PENDING_RESTAURANT_CONFIRMATION
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  CANCELLED
+}
+
+enum WebhookStatus {
+  RECEIVED
+  PROCESSING
+  COMPLETED
+  FAILED
+  DUPLICATE
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model Restaurant {
+  id                     String                @id @default(uuid()) @db.Uuid
+  name                   String                @db.VarChar(255)
+  phone_number_id        String                @unique @db.VarChar(64)
+  waba_id                String                @db.VarChar(64)
+  owner_phone            String                @db.VarChar(32)
+  access_token_encrypted String                @db.Text
+  is_active              Boolean               @default(true)
+  created_at             DateTime              @default(now()) @db.Timestamptz()
+  updated_at             DateTime              @updatedAt @db.Timestamptz()
+
+  orders                 Order[]
+  sessions               ConversationSession[]
+  saved_addresses        SavedAddress[]
+  webhook_events         WebhookEvent[]
+  notifications          OrderNotification[]
+
+  @@map("restaurants")
+}
+
+model Order {
+  id               String              @id @default(uuid()) @db.Uuid
+  restaurant_id    String              @db.Uuid
+  order_reference  String              @unique @db.VarChar(32)
+  customer_name    String?             @db.VarChar(255)
+  customer_phone   String              @db.VarChar(32)
+  address_snapshot String?             @db.Text
+  latitude         Decimal?            @db.Decimal(10, 7)
+  longitude        Decimal?            @db.Decimal(10, 7)
+  order_type       OrderType
+  items            Json                @db.JsonB
+  total_amount     Decimal             @db.Decimal(10, 2)
+  currency         String              @default("INR") @db.Char(3)
+  status           OrderStatus         @default(PENDING_RESTAURANT_CONFIRMATION)
+  decision_at      DateTime?           @db.Timestamptz()
+  created_at       DateTime            @default(now()) @db.Timestamptz()
+  updated_at       DateTime            @updatedAt @db.Timestamptz()
+
+  restaurant       Restaurant          @relation(fields: [restaurant_id], references: [id], onDelete: Restrict)
+  notifications    OrderNotification[]
+
+  @@index([restaurant_id, status])
+  @@index([restaurant_id, customer_phone])
+  @@map("orders")
+}
+
+model ConversationSession {
+  id             String     @id @default(uuid()) @db.Uuid
+  restaurant_id  String     @db.Uuid
+  customer_phone String     @db.VarChar(32)
+  current_step   String     @default("IDLE") @db.VarChar(64)
+  state          Json       @default("{}") @db.JsonB
+  expires_at     DateTime   @db.Timestamptz()
+  created_at     DateTime   @default(now()) @db.Timestamptz()
+  updated_at     DateTime   @updatedAt @db.Timestamptz()
+
+  restaurant     Restaurant @relation(fields: [restaurant_id], references: [id], onDelete: Cascade)
+
+  @@unique([restaurant_id, customer_phone])
+  @@index([expires_at])
+  @@map("conversation_sessions")
+}
+
+model SavedAddress {
+  id             String     @id @default(uuid()) @db.Uuid
+  restaurant_id  String     @db.Uuid
+  customer_phone String     @db.VarChar(32)
+  label          String?    @default("Default") @db.VarChar(64)
+  address        String     @db.Text
+  latitude       Decimal?   @db.Decimal(10, 7)
+  longitude      Decimal?   @db.Decimal(10, 7)
+  created_at     DateTime   @default(now()) @db.Timestamptz()
+  updated_at     DateTime   @updatedAt @db.Timestamptz()
+
+  restaurant     Restaurant @relation(fields: [restaurant_id], references: [id], onDelete: Cascade)
+
+  @@index([restaurant_id, customer_phone])
+  @@map("saved_addresses")
+}
+
+model WebhookEvent {
+  id                String        @id @default(uuid()) @db.Uuid
+  restaurant_id     String?       @db.Uuid
+  event_key         String        @unique @db.VarChar(128)
+  event_type        String        @db.VarChar(32)
+  payload_summary   Json?         @db.JsonB
+  processing_status WebhookStatus @default(RECEIVED)
+  received_at       DateTime      @default(now()) @db.Timestamptz()
+  processed_at      DateTime?     @db.Timestamptz()
+
+  restaurant        Restaurant?   @relation(fields: [restaurant_id], references: [id], onDelete: SetNull)
+
+  @@index([processing_status])
+  @@map("webhook_events")
+}
+
+model OrderNotification {
+  id                String             @id @default(uuid()) @db.Uuid
+  order_id          String             @db.Uuid
+  restaurant_id     String             @db.Uuid
+  recipient_phone   String             @db.VarChar(32)
+  notification_type String             @db.VarChar(32)
+  template_name     String?            @db.VarChar(64)
+  delivery_status   NotificationStatus @default(PENDING)
+  retry_count       Int                @default(0)
+  error_message     String?            @db.Text
+  created_at        DateTime           @default(now()) @db.Timestamptz()
+  sent_at           DateTime?          @db.Timestamptz()
+
+  order             Order              @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  restaurant        Restaurant         @relation(fields: [restaurant_id], references: [id], onDelete: Cascade)
+
+  @@index([delivery_status, retry_count])
+  @@map("order_notifications")
+}

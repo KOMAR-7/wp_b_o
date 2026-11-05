@@ -58,18 +58,18 @@
 
 ## Stage 3 — Database Foundation & Prisma Schema
 
-- [ ] **ST3-01:** Install and configure Prisma ORM with PostgreSQL provider.  
-  *Acceptance Criterion:* `prisma/schema.prisma` configured and connected to local PostgreSQL.
-- [ ] **ST3-02:** Define complete database models in `schema.prisma`.  
-  *Acceptance Criterion:* Schema includes `Restaurant`, `Order`, `ConversationSession`, `SavedAddress`, `WebhookEvent`, `OrderNotification`.
-- [ ] **ST3-03:** Generate and apply initial database migration.  
-  *Acceptance Criterion:* `npx prisma migrate dev` creates all 6 tables, foreign keys, indexes, and constraints.
-- [ ] **ST3-04:** Create Prisma database client singleton in `src/config/database.js`.  
-  *Acceptance Criterion:* Application shares single Prisma client instance across requests.
-- [ ] **ST3-05:** Implement test database seed script in `prisma/seed.js`.  
-  *Acceptance Criterion:* Seeding provisions Restaurant A (`111111`) and Restaurant B (`222222`).
-- [ ] **ST3-06:** Verify unique constraints and foreign key cascade rules in database.  
-  *Acceptance Criterion:* Attempting duplicate `phone_number_id` or duplicate `order_reference` throws DB error.
+- [x] **ST3-01:** Install and configure Prisma ORM with PostgreSQL provider.  
+  *Acceptance Criterion:* Verified: Prisma v6.19.3 installed, connected to local PostgreSQL database `restopro_dev`.
+- [x] **ST3-02:** Define complete database models in `schema.prisma`.  
+  *Acceptance Criterion:* Verified: Models `Restaurant`, `Order`, `ConversationSession`, `SavedAddress`, `WebhookEvent`, `OrderNotification` with 4 explicit enums defined.
+- [x] **ST3-03:** Generate and apply initial database migration.  
+  *Acceptance Criterion:* Verified: Migration `20261105105348_init_restopro_schema` applied cleanly to PostgreSQL.
+- [x] **ST3-04:** Create Prisma database client singleton in `src/config/database.js`.  
+  *Acceptance Criterion:* Verified: Shared client singleton configured with graceful shutdown disconnection in `src/server.js`.
+- [x] **ST3-05:** Implement test database seed script in `prisma/seed.js`.  
+  *Acceptance Criterion:* Verified: `npm run db:seed` provisions Tenant A (`111111111111111`) and Tenant B (`222222222222222`).
+- [x] **ST3-06:** Verify unique constraints and foreign key cascade rules in database.  
+  *Acceptance Criterion:* Verified in `test/stage2-database-test.js` (P2002 on unique violations, P2003 on invalid FKs, Restrict on active orders).
 
 ---
 

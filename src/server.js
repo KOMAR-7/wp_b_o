@@ -4,6 +4,7 @@
 const app = require('./app');
 const config = require('./config/env');
 const logger = require('./utils/logger');
+const prisma = require('./config/database');
 
 const server = app.listen(config.port, () => {
   logger.info(`RESTOPRO Backend listening on port ${config.port}`, {
@@ -14,9 +15,15 @@ const server = app.listen(config.port, () => {
   });
 });
 
-function gracefulShutdown(signal) {
+async function gracefulShutdown(signal) {
   logger.info(`Received ${signal}. Shutting down HTTP server gracefully...`);
-  server.close(() => {
+  server.close(async () => {
+    try {
+      await prisma.$disconnect();
+      logger.info('Prisma database client disconnected cleanly.');
+    } catch (err) {
+      logger.error('Error during database disconnection', { error: err.message });
+    }
     logger.info('HTTP server closed successfully.');
     process.exit(0);
   });

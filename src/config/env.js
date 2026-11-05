@@ -9,6 +9,7 @@ dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 const config = {
   port: parseInt(process.env.PORT || '3000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
+  databaseUrl: process.env.DATABASE_URL || '',
   meta: {
     verifyToken: process.env.META_VERIFY_TOKEN || '',
     appSecret: process.env.META_APP_SECRET || '',
@@ -24,6 +25,7 @@ const config = {
  */
 function validateConfig(testConfig = config) {
   const missing = [];
+  if (!testConfig.databaseUrl) missing.push('DATABASE_URL');
   if (!testConfig.meta.verifyToken) missing.push('META_VERIFY_TOKEN');
   if (!testConfig.meta.appSecret) missing.push('META_APP_SECRET');
 
@@ -31,7 +33,7 @@ function validateConfig(testConfig = config) {
     if (testConfig.nodeEnv === 'production') {
       throw new Error(`[CONFIG ERROR] Missing required environment variables in production: ${missing.join(', ')}`);
     } else {
-      console.warn(`[CONFIG WARNING] Missing configuration keys for live Meta integration: ${missing.join(', ')}.`);
+      console.warn(`[CONFIG WARNING] Missing configuration keys: ${missing.join(', ')}.`);
     }
   }
   return missing;
