@@ -9,15 +9,20 @@ const { resolveTenantByPhoneNumberId } = require('./tenant.service');
 
 /**
  * Persists an incoming webhook event record to PostgreSQL for idempotency and auditability.
- * Uses event_key (wamid) unique constraint to detect duplicate deliveries.
+ * Uses event_key unique constraint to detect duplicate deliveries.
+ * For status receipts, event_key incorporates the status value to allow sent -> delivered -> read progressions.
  *
  * @param {Object} event - Normalized event object from webhook-parser
  * @returns {Promise<{isDuplicate: boolean, eventRecord?: Object}>}
  */
 async function recordIncomingEvent(event) {
-  const eventKey = event.messageId;
+  // Compute stable deduplication key
+  let eventKey = event.messageId;
+  if (event.category === 'STATUS_RECEIPT' && event.messageId && event.status) {
+    eventKey = `status:${event.messageId}:${event.status}`;
+  }
 
-  // If payload has no messageId (e.g. empty ping or non-message change), don't deduplicate
+  // If payload has no event key (e.g. empty ping or non-message change), don't deduplicate
   if (!eventKey) {
     return { isDuplicate: false, eventRecord: null };
   }
@@ -31,13 +36,20 @@ async function recordIncomingEvent(event) {
     }
   }
 
-  // Minimized audit summary (no sensitive secrets or unnecessary PII)
+  // Comprehensive audit summary capturing parsed details for debugging and retry
   const payloadSummary = {
     category: event.category,
     messageType: event.messageType,
     senderPhone: event.senderPhone,
+    senderName: event.senderName,
     phoneNumberId: event.phoneNumberId,
-    timestamp: event.timestamp
+    timestamp: event.timestamp,
+    ...(event.text ? { text: event.text } : {}),
+    ...(event.order ? { order: event.order } : {}),
+    ...(event.location ? { location: event.location } : {}),
+    ...(event.buttonReply ? { buttonReply: event.buttonReply } : {}),
+    ...(event.interactiveReply ? { interactiveReply: event.interactiveReply } : {}),
+    ...(event.status ? { status: event.status, recipientId: event.recipientId } : {})
   };
 
   try {

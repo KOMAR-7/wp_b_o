@@ -115,3 +115,4 @@
 | `error_message` | `TEXT` | Yes | None | Failure details. |
 | `created_at` | `TIMESTAMPTZ` | No | `NOW()` | Queue timestamp. |
 | `sent_at` | `TIMESTAMPTZ` | Yes | None | Delivery timestamp. |
+

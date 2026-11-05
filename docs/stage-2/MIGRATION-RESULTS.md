@@ -71,3 +71,4 @@ Running generate... - Prisma Client
 - `webhook_events_restaurant_id_fkey`: `REFERENCES restaurants(id) ON DELETE SET NULL`
 - `order_notifications_order_id_fkey`: `REFERENCES orders(id) ON DELETE CASCADE`
 - `order_notifications_restaurant_id_fkey`: `REFERENCES restaurants(id) ON DELETE CASCADE`
+

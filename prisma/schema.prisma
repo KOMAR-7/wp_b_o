@@ -152,3 +152,4 @@ model OrderNotification {
   @@index([delivery_status, retry_count])
   @@map("order_notifications")
 }
+

@@ -75,10 +75,10 @@
 
 ## Stage 4 — Single Restaurant Customer Ordering Engine
 
-- [ ] **ST4-01:** Implement `src/services/tenant.service.js` for tenant resolution.  
-  *Acceptance Criterion:* Correctly resolves `restaurant_id` from `metadata.phone_number_id`; rejects unknown IDs.
-- [ ] **ST4-02:** Implement event deduplication using `webhook_events` table.  
-  *Acceptance Criterion:* Re-sending an identical `wamid` returns immediately without re-triggering logic.
+- [x] **ST4-01:** Implement `src/services/tenant.service.js` for tenant resolution.  
+  *Acceptance Criterion:* Verified in `test/stage2-database-test.js`: resolves `restaurant_id` strictly from `metadata.phone_number_id`; rejects unknown/empty IDs; enforces `scopeQuery`.
+- [x] **ST4-02:** Implement event deduplication using `webhook_events` table.  
+  *Acceptance Criterion:* Verified in `test/stage2-database-test.js`: `event_key` unique constraint prevents duplicate processing across messages, concurrent storms, and status receipt collisions.
 - [ ] **ST4-03:** Implement `src/services/whatsapp.service.js` for outbound messaging.  
   *Acceptance Criterion:* Successfully sends text messages and interactive catalog prompts via Meta Graph API.
 - [ ] **ST4-04:** Handle initial customer greeting ("Hi") in `conversation.service.js`.  

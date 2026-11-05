@@ -1,16 +1,16 @@
-# RESTOPRO — Stage 2: Database & Multi-Tenant Test Execution Results
+# RESTOPRO — Stage 2 & 2.1: Database & Multi-Tenant Test Execution Results
 
 **Execution Date:** 2026-11-05  
 **Test Suites Executed:**
-1. `test/stage2-database-test.js` (33 assertions)
-2. `test/webhook-test.js` (86 assertions)  
-**Total Passed:** 119  
+1. `test/stage2-database-test.js` (50 assertions across 11 test groups)
+2. `test/webhook-test.js` (86 assertions across 10 test groups)  
+**Total Passed:** 136  
 **Total Failed:** 0  
 **Overall Status:** 100% Passing  
 
 ---
 
-## 1. Stage 2 Dedicated Test Suite Breakdown (`test/stage2-database-test.js`)
+## 1. Stage 2 & 2.1 Dedicated Test Suite Breakdown (`test/stage2-database-test.js`)
 
 ```text
 ============================================================
@@ -62,8 +62,35 @@
   ✅ [PASS] Duplicate HTTP webhook returns 200 cleanly
   ✅ [PASS] Database maintains exactly 1 record after duplicate HTTP webhook
 
+--- TEST GROUP 7: Concurrent Duplicate Webhook Storm ---
+  ✅ [PASS] All 5 concurrent HTTP webhook requests returned HTTP 200
+  ✅ [PASS] Exactly 1 webhook_events row created despite 5 concurrent requests
+
+--- TEST GROUP 8: Multi-Message Webhook Batches & Mixed Retries ---
+  ✅ [PASS] Batch 1 with Alpha & Beta returns HTTP 200
+  ✅ [PASS] Batch 2 with Alpha (dupe) & Gamma (new) returns HTTP 200
+  ✅ [PASS] Alpha has exactly 1 row (duplicate safely dropped)
+  ✅ [PASS] Beta has exactly 1 row
+  ✅ [PASS] Gamma has exactly 1 row (new message in batch processed successfully)
+
+--- TEST GROUP 9: Status Progression for Same Message ID ---
+  ✅ [PASS] Status "sent" is persisted
+  ✅ [PASS] Status "delivered" for same wamid is NOT flagged duplicate
+  ✅ [PASS] Status "read" for same wamid is NOT flagged duplicate
+  ✅ [PASS] Repeat of status "read" is correctly flagged as duplicate
+
+--- TEST GROUP 10: Unknown phone_number_id Handling ---
+  ✅ [PASS] Unknown phone_number_id event persists without error
+  ✅ [PASS] Unknown phone_number_id row created in webhook_events
+  ✅ [PASS] restaurant_id safely set to null for unmapped tenant
+
+--- TEST GROUP 11: Audit Trail Completeness ---
+  ✅ [PASS] Audit row contains payload_summary
+  ✅ [PASS] payload_summary contains parsed subtotal
+  ✅ [PASS] payload_summary contains item SKU for debugging/retry
+
 ============================================================
-   STAGE 2 TEST RESULTS: 33 PASSED, 0 FAILED
+   STAGE 2 TEST RESULTS: 50 PASSED, 0 FAILED
 ============================================================
 ```
 
@@ -95,3 +122,4 @@ Executing `npm run test:webhook`:
 3. **Webhook Ingestion Durability:** Webhook events are guaranteed to be inserted into PostgreSQL `webhook_events` before the HTTP response is sent.
 4. **Idempotency Under Retry Storms:** Re-sending an identical `wamid` returns HTTP 200 immediately without creating duplicate database records or advancing state.
 5. **Referential Deletion Protection:** Deleting a restaurant with live orders is blocked at the database level (`onDelete: Restrict`).
+

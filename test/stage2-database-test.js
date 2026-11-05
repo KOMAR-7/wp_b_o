@@ -414,6 +414,238 @@ async function runStage2Tests() {
       assert(dupeCheck.length === 1, 'Database maintains exactly 1 record after duplicate HTTP webhook');
     }
 
+    // -------------------------------------------------------------
+    // TEST GROUP 7: Concurrent Duplicate Webhook Storm
+    // -------------------------------------------------------------
+    console.log('\n--- TEST GROUP 7: Concurrent Duplicate Webhook Storm (5 Simultaneous Requests) ---');
+    {
+      const stormEventKey = `wamid.STORM_${Date.now()}`;
+      const stormPayload = JSON.stringify({
+        object: 'whatsapp_business_account',
+        entry: [
+          {
+            id: 'WABA_STORM',
+            changes: [
+              {
+                field: 'messages',
+                value: {
+                  messaging_product: 'whatsapp',
+                  metadata: { phone_number_id: '111111111111111', display_phone_number: '155501' },
+                  messages: [
+                    {
+                      from: '919876543210',
+                      id: stormEventKey,
+                      timestamp: String(Math.floor(Date.now() / 1000)),
+                      type: 'text',
+                      text: { body: 'Concurrent storm test' }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      });
+
+      const signature = computeSignature(stormPayload, config.meta.appSecret);
+
+      // Fire 5 identical requests simultaneously
+      const promises = Array(5).fill(null).map(() =>
+        makeRequest({
+          method: 'POST',
+          path: '/api/webhook',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-hub-signature-256': signature
+          },
+          body: stormPayload
+        })
+      );
+
+      const responses = await Promise.all(promises);
+      const allStatus200 = responses.every(r => r.statusCode === 200);
+      assert(allStatus200, 'All 5 concurrent requests acknowledged with HTTP 200');
+
+      const stormRows = await prisma.webhookEvent.findMany({
+        where: { event_key: stormEventKey }
+      });
+      assert(stormRows.length === 1, 'Exactly 1 database row exists after concurrent storm (Race condition immune)');
+    }
+
+    // -------------------------------------------------------------
+    // TEST GROUP 8: Multi-Message Batch with Mixed New & Duplicate Messages
+    // -------------------------------------------------------------
+    console.log('\n--- TEST GROUP 8: Multi-Message Batch with Mixed New & Duplicate Messages ---');
+    {
+      const msgIdAlpha = `wamid.BATCH_ALPHA_${Date.now()}`;
+      const msgIdBeta = `wamid.BATCH_BETA_${Date.now()}`;
+      const msgIdGamma = `wamid.BATCH_GAMMA_${Date.now()}`;
+
+      // Batch 1: Contains Alpha and Beta
+      const batch1Payload = JSON.stringify({
+        object: 'whatsapp_business_account',
+        entry: [
+          {
+            id: 'WABA_BATCH',
+            changes: [
+              {
+                field: 'messages',
+                value: {
+                  messaging_product: 'whatsapp',
+                  metadata: { phone_number_id: '111111111111111' },
+                  messages: [
+                    { from: '919876543210', id: msgIdAlpha, timestamp: '1730000000', type: 'text', text: { body: 'Msg Alpha' } },
+                    { from: '919876543210', id: msgIdBeta, timestamp: '1730000001', type: 'text', text: { body: 'Msg Beta' } }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      });
+
+      const res1 = await makeRequest({
+        method: 'POST',
+        path: '/api/webhook',
+        headers: { 'Content-Type': 'application/json', 'x-hub-signature-256': computeSignature(batch1Payload, config.meta.appSecret) },
+        body: batch1Payload
+      });
+      assert(res1.statusCode === 200, 'Batch 1 with Alpha & Beta returns HTTP 200');
+
+      // Batch 2: Contains Alpha (duplicate) and Gamma (new)
+      const batch2Payload = JSON.stringify({
+        object: 'whatsapp_business_account',
+        entry: [
+          {
+            id: 'WABA_BATCH',
+            changes: [
+              {
+                field: 'messages',
+                value: {
+                  messaging_product: 'whatsapp',
+                  metadata: { phone_number_id: '111111111111111' },
+                  messages: [
+                    { from: '919876543210', id: msgIdAlpha, timestamp: '1730000000', type: 'text', text: { body: 'Msg Alpha' } },
+                    { from: '919876543210', id: msgIdGamma, timestamp: '1730000002', type: 'text', text: { body: 'Msg Gamma' } }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      });
+
+      const res2 = await makeRequest({
+        method: 'POST',
+        path: '/api/webhook',
+        headers: { 'Content-Type': 'application/json', 'x-hub-signature-256': computeSignature(batch2Payload, config.meta.appSecret) },
+        body: batch2Payload
+      });
+      assert(res2.statusCode === 200, 'Batch 2 with Alpha (dupe) & Gamma (new) returns HTTP 200');
+
+      const alphaCheck = await prisma.webhookEvent.findMany({ where: { event_key: msgIdAlpha } });
+      const betaCheck = await prisma.webhookEvent.findMany({ where: { event_key: msgIdBeta } });
+      const gammaCheck = await prisma.webhookEvent.findMany({ where: { event_key: msgIdGamma } });
+
+      assert(alphaCheck.length === 1, 'Alpha has exactly 1 row (duplicate safely dropped)');
+      assert(betaCheck.length === 1, 'Beta has exactly 1 row');
+      assert(gammaCheck.length === 1, 'Gamma has exactly 1 row (new message in batch processed successfully)');
+    }
+
+    // -------------------------------------------------------------
+    // TEST GROUP 9: Status Update Delivery Progression (Sent -> Delivered -> Read)
+    // -------------------------------------------------------------
+    console.log('\n--- TEST GROUP 9: Status Progression for Same Message ID ---');
+    {
+      const trackedWamid = `wamid.TRACKED_${Date.now()}`;
+
+      // Status 1: sent
+      const resSent = await recordIncomingEvent({
+        category: 'STATUS_RECEIPT',
+        messageId: trackedWamid,
+        status: 'sent',
+        phoneNumberId: '111111111111111'
+      });
+      assert(resSent.isDuplicate === false, 'Status "sent" is persisted');
+
+      // Status 2: delivered
+      const resDelivered = await recordIncomingEvent({
+        category: 'STATUS_RECEIPT',
+        messageId: trackedWamid,
+        status: 'delivered',
+        phoneNumberId: '111111111111111'
+      });
+      assert(resDelivered.isDuplicate === false, 'Status "delivered" for same wamid is NOT flagged duplicate');
+
+      // Status 3: read
+      const resRead = await recordIncomingEvent({
+        category: 'STATUS_RECEIPT',
+        messageId: trackedWamid,
+        status: 'read',
+        phoneNumberId: '111111111111111'
+      });
+      assert(resRead.isDuplicate === false, 'Status "read" for same wamid is NOT flagged duplicate');
+
+      // Repeat Status 3: read (identical duplicate)
+      const resReadDupe = await recordIncomingEvent({
+        category: 'STATUS_RECEIPT',
+        messageId: trackedWamid,
+        status: 'read',
+        phoneNumberId: '111111111111111'
+      });
+      assert(resReadDupe.isDuplicate === true, 'Repeat of status "read" is correctly flagged as duplicate');
+    }
+
+    // -------------------------------------------------------------
+    // TEST GROUP 10: Unknown phone_number_id Safe Handling
+    // -------------------------------------------------------------
+    console.log('\n--- TEST GROUP 10: Unknown phone_number_id Handling ---');
+    {
+      const unknownEventKey = `wamid.UNKNOWN_PHONE_${Date.now()}`;
+      const resUnknown = await recordIncomingEvent({
+        category: 'INCOMING_MESSAGE',
+        messageId: unknownEventKey,
+        phoneNumberId: '999999999999999', // Unknown tenant
+        messageType: 'text',
+        text: 'Unknown tenant ping'
+      });
+      assert(resUnknown.isDuplicate === false, 'Unknown phone_number_id event persists without error');
+
+      const savedUnknown = await prisma.webhookEvent.findUnique({
+        where: { event_key: unknownEventKey }
+      });
+      assert(savedUnknown !== null, 'Unknown phone_number_id row created in webhook_events');
+      assert(savedUnknown.restaurant_id === null, 'restaurant_id safely set to null for unmapped tenant');
+    }
+
+    // -------------------------------------------------------------
+    // TEST GROUP 11: Audit Trail Completeness in payload_summary
+    // -------------------------------------------------------------
+    console.log('\n--- TEST GROUP 11: Audit Trail Completeness ---');
+    {
+      const auditEventKey = `wamid.AUDIT_DETAIL_${Date.now()}`;
+      await recordIncomingEvent({
+        category: 'INCOMING_MESSAGE',
+        messageId: auditEventKey,
+        phoneNumberId: '111111111111111',
+        senderPhone: '919876543210',
+        messageType: 'order',
+        order: {
+          catalogId: 'CAT_TEST',
+          calculatedSubtotal: 350.00,
+          currency: 'INR',
+          items: [{ productRetailerId: 'SKU_X', quantity: 1, unitPrice: 350.00 }]
+        }
+      });
+
+      const auditRow = await prisma.webhookEvent.findUnique({
+        where: { event_key: auditEventKey }
+      });
+      assert(auditRow.payload_summary !== null, 'Audit row contains payload_summary');
+      assert(auditRow.payload_summary.order.calculatedSubtotal === 350, 'payload_summary contains parsed subtotal');
+      assert(auditRow.payload_summary.order.items[0].productRetailerId === 'SKU_X', 'payload_summary contains item SKU for debugging/retry');
+    }
+
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await prisma.$disconnect();

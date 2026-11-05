@@ -114,3 +114,4 @@ To seed two isolated development test restaurants (Restaurant A & Restaurant B):
 npm run db:seed
 ```
 *Never seed production credentials or real customer data.*
+

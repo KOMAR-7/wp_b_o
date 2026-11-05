@@ -23,3 +23,4 @@ prisma.$on('warn', (e) => {
 });
 
 module.exports = prisma;
+
