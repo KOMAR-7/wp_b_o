@@ -39,7 +39,7 @@
 ### 2.2 `orders` (Immutable Submitted Orders)
 | Column | Type | Nullable | Constraints / Defaults | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `id` | `UUID` | No | `PRIMARY KEY` | Internal order UUID. |
+| `id` | `UUID` | No | `PRIMARY KEY`, Composite unique with `restaurant_id` | Internal order UUID. |
 | `restaurant_id` | `UUID` | No | `FK -> restaurants(id) ON DELETE RESTRICT` | Owning restaurant tenant. |
 | `order_reference` | `VARCHAR(32)` | No | `UNIQUE` | Human-friendly order identifier (e.g. `RP-1024`). |
 | `customer_name` | `VARCHAR(255)` | Yes | None | Customer display name from WhatsApp. |
@@ -105,7 +105,7 @@
 | Column | Type | Nullable | Constraints / Defaults | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | `id` | `UUID` | No | `PRIMARY KEY` | Outbox notification UUID. |
-| `order_id` | `UUID` | No | `FK -> orders(id) ON DELETE CASCADE` | Associated order. |
+| `order_id` | `UUID` | No | `FK -> orders(id, restaurant_id) ON DELETE CASCADE` | Associated order (enforced with tenant consistency). |
 | `restaurant_id` | `UUID` | No | `FK -> restaurants(id) ON DELETE CASCADE` | Associated tenant. |
 | `recipient_phone` | `VARCHAR(32)` | No | None | Target phone number. |
 | `notification_type` | `VARCHAR(32)` | No | None | Notification category. |
@@ -115,4 +115,7 @@
 | `error_message` | `TEXT` | Yes | None | Failure details. |
 | `created_at` | `TIMESTAMPTZ` | No | `NOW()` | Queue timestamp. |
 | `sent_at` | `TIMESTAMPTZ` | Yes | None | Delivery timestamp. |
+
+> [!IMPORTANT]
+> **Stage 3 Hardened Multi-Tenant Invariant:** `order_notifications` enforces a composite foreign key `(order_id, restaurant_id) REFERENCES orders(id, restaurant_id)`. It is physically impossible at the database engine level for a notification to reference an order belonging to another restaurant.
 

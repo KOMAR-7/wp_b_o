@@ -1,12 +1,12 @@
-# RESTOPRO — Stage 2 & 2.1: Database & Multi-Tenant Test Execution Results
+# RESTOPRO — Stage 2 & Stage 3: Database & Multi-Tenant Test Execution Results
 
 **Execution Date:** 2026-11-05  
 **Test Suites Executed:**
-1. `test/stage2-database-test.js` (50 assertions across 11 test groups)
+1. `test/stage2-database-test.js` (59 assertions across 13 test groups)
 2. `test/webhook-test.js` (86 assertions across 10 test groups)  
-**Total Passed:** 136  
+**Total Passed:** 145  
 **Total Failed:** 0  
-**Overall Status:** 100% Passing  
+**Overall Status:** 100% Passing    
 
 ---
 
@@ -89,8 +89,21 @@
   ✅ [PASS] payload_summary contains parsed subtotal
   ✅ [PASS] payload_summary contains item SKU for debugging/retry
 
+--- TEST GROUP 12: Composite Foreign Key Integrity ---
+  ✅ [PASS] Matching (order_id, restaurant_id) notification insertion succeeds
+  ✅ [PASS] Persisted notification has correct restaurant_id
+  ✅ [PASS] Mismatched restaurant_id is rejected by PostgreSQL foreign key constraint
+  ✅ [PASS] Mismatched insert triggers Prisma foreign key error code P2003
+  ✅ [PASS] Existing notification remains valid and queryable
+  ✅ [PASS] Notification correctly joins with parent order
+  ✅ [PASS] Notification correctly joins with parent restaurant
+
+--- TEST GROUP 13: Graceful Shutdown Lifecycle ---
+  ✅ [PASS] HTTP server closes and stops accepting connections cleanly
+  ✅ [PASS] Prisma database client disconnects cleanly without hanging
+
 ============================================================
-   STAGE 2 TEST RESULTS: 50 PASSED, 0 FAILED
+   STAGE 2 & 3 TEST RESULTS: 59 PASSED, 0 FAILED
 ============================================================
 ```
 
@@ -122,4 +135,6 @@ Executing `npm run test:webhook`:
 3. **Webhook Ingestion Durability:** Webhook events are guaranteed to be inserted into PostgreSQL `webhook_events` before the HTTP response is sent.
 4. **Idempotency Under Retry Storms:** Re-sending an identical `wamid` returns HTTP 200 immediately without creating duplicate database records or advancing state.
 5. **Referential Deletion Protection:** Deleting a restaurant with live orders is blocked at the database level (`onDelete: Restrict`).
+6. **Composite Foreign Key Tenant Consistency:** `order_notifications` physically cannot reference an order belonging to another restaurant; enforced by PostgreSQL constraint `order_notifications_order_id_restaurant_id_fkey`.
+7. **Clean Lifecycle Shutdown:** Express stops accepting connections, in-flight work completes, and Prisma connection pool disconnects cleanly on SIGINT/SIGTERM.
 

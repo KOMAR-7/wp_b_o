@@ -49,12 +49,38 @@ Running generate... - Prisma Client
 5. `"webhook_events"` (Idempotency and incoming payload audit trail)
 6. `"order_notifications"` (Durable notification outbox queue)
 
-### 2.3 Unique Constraints & Composite Keys (5)
+### 2.3 Unique Constraints & Composite Keys (6)
 - `restaurants_phone_number_id_key` (`UNIQUE (phone_number_id)`)
 - `orders_order_reference_key` (`UNIQUE (order_reference)`)
+- `orders_id_restaurant_id_key` (`UNIQUE (id, restaurant_id)`) — *Added in Stage 3*
 - `conversation_sessions_restaurant_id_customer_phone_key` (`UNIQUE (restaurant_id, customer_phone)`)
 - `webhook_events_event_key_key` (`UNIQUE (event_key)`)
 - Primary keys on all 6 tables using `UUID`
+
+---
+
+## 3. Stage 3 Migration: Enforce Notification Tenant Consistency
+
+Migration: `20261105121500_enforce_notification_tenant_consistency`
+
+### 3.1 DDL Script Applied
+```sql
+-- DropForeignKey
+ALTER TABLE "order_notifications" DROP CONSTRAINT "order_notifications_order_id_fkey";
+
+-- CreateIndex
+CREATE UNIQUE INDEX "orders_id_restaurant_id_key" ON "orders"("id", "restaurant_id");
+
+-- AddForeignKey
+ALTER TABLE "order_notifications" ADD CONSTRAINT "order_notifications_order_id_restaurant_id_fkey" 
+  FOREIGN KEY ("order_id", "restaurant_id") 
+  REFERENCES "orders"("id", "restaurant_id") 
+  ON DELETE CASCADE ON UPDATE CASCADE;
+```
+
+### 3.2 Dual Database Verification
+1. **Development Database (`restopro_dev`):** Applied via `npx prisma migrate deploy`. Schema verified in sync.
+2. **Clean Audit Database (`restopro_stage3_audit`):** Provisioned from scratch, both migrations applied sequentially. Schema verified in sync with 0 errors.
 
 ### 2.4 Performance & Query Indexes (6)
 - `orders_restaurant_id_status_idx` on `(restaurant_id, status)`

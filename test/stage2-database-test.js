@@ -646,9 +646,81 @@ async function runStage2Tests() {
       assert(auditRow.payload_summary.order.items[0].productRetailerId === 'SKU_X', 'payload_summary contains item SKU for debugging/retry');
     }
 
+    // -------------------------------------------------------------
+    // TEST GROUP 12: Composite Foreign Key Integrity (order_id, restaurant_id)
+    // -------------------------------------------------------------
+    console.log('\n--- TEST GROUP 12: Composite Foreign Key Integrity ---');
+    {
+      // 12.1 Matching order_id and restaurant_id: Insertion must succeed
+      const validNotification = await prisma.orderNotification.create({
+        data: {
+          order_id: orderA.id,
+          restaurant_id: tenantA.id, // Matching: orderA belongs to tenantA
+          recipient_phone: tenantA.owner_phone,
+          notification_type: 'ORDER_ALERT',
+          template_name: 'order_alert_v1',
+          delivery_status: 'PENDING'
+        }
+      });
+      assert(validNotification.id !== null, 'Matching (order_id, restaurant_id) notification insertion succeeds');
+      assert(validNotification.restaurant_id === tenantA.id, 'Persisted notification has correct restaurant_id');
+
+      // 12.2 Mismatched restaurant_id: PostgreSQL must reject with Foreign Key Violation
+      let mismatchedFkThrew = false;
+      let fkErrorCode = null;
+      try {
+        await prisma.orderNotification.create({
+          data: {
+            order_id: orderA.id,        // Belongs to Tenant A!
+            restaurant_id: tenantB.id,   // Mismatched: Assigned to Tenant B!
+            recipient_phone: tenantB.owner_phone,
+            notification_type: 'ORDER_ALERT',
+            template_name: 'order_alert_v1',
+            delivery_status: 'PENDING'
+          }
+        });
+      } catch (err) {
+        mismatchedFkThrew = true;
+        fkErrorCode = err.code;
+      }
+      assert(mismatchedFkThrew, 'Mismatched restaurant_id is rejected by PostgreSQL foreign key constraint');
+      assert(fkErrorCode === 'P2003', 'Mismatched insert triggers Prisma foreign key error code P2003');
+
+      // 12.3 Existing records remain valid and queryable
+      const fetchedNotification = await prisma.orderNotification.findUnique({
+        where: { id: validNotification.id },
+        include: { order: true, restaurant: true }
+      });
+      assert(fetchedNotification !== null, 'Existing notification remains valid and queryable');
+      assert(fetchedNotification.order.id === orderA.id, 'Notification correctly joins with parent order');
+      assert(fetchedNotification.restaurant.id === tenantA.id, 'Notification correctly joins with parent restaurant');
+    }
+
   } finally {
-    await new Promise((resolve) => server.close(resolve));
-    await prisma.$disconnect();
+    // -------------------------------------------------------------
+    // TEST GROUP 13: Graceful Server & Database Lifecycle Shutdown
+    // -------------------------------------------------------------
+    console.log('\n--- TEST GROUP 13: Graceful Shutdown Lifecycle ---');
+    let serverClosedCleanly = false;
+    let prismaDisconnectedCleanly = false;
+
+    try {
+      await new Promise((resolve) => server.close((err) => {
+        if (!err) serverClosedCleanly = true;
+        resolve();
+      }));
+      assert(serverClosedCleanly, 'HTTP server closes and stops accepting connections cleanly');
+    } catch (e) {
+      assert(false, 'HTTP server close threw an error: ' + e.message);
+    }
+
+    try {
+      await prisma.$disconnect();
+      prismaDisconnectedCleanly = true;
+      assert(prismaDisconnectedCleanly, 'Prisma database client disconnects cleanly without hanging');
+    } catch (e) {
+      assert(false, 'Prisma disconnect threw an error: ' + e.message);
+    }
   }
 
   console.log('\n============================================================');

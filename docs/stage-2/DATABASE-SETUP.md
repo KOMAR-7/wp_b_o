@@ -115,3 +115,34 @@ npm run db:seed
 ```
 *Never seed production credentials or real customer data.*
 
+---
+
+## 7. Connection Pool & Hostinger VPS Capacity Planning
+
+### 7.1 PostgreSQL Server Ceiling
+PostgreSQL default configuration provides:
+```sql
+SHOW max_connections; -- 100
+```
+On typical Hostinger Ubuntu VPS setups (2 to 4 vCPUs, 8 GB RAM), increasing `max_connections` excessively causes excessive memory consumption per backend connection process (Postgres spawns a dedicated process per connection). A ceiling of 100 connections is standard and safe.
+
+### 7.2 Connection Budget Breakdown
+When running under PM2 cluster mode in Stage 8:
+* **Web Server Instances:** 4 PM2 cluster workers.
+* **Per-Worker Connection Limit:** `connection_limit = 10`.
+* **Peak Web Traffic Utilization:** $4 \times 10 = 40$ connections.
+* **Background Jobs (Stage 7):**
+  * `notification-worker.js`: 5 connections.
+  * `session-cleanup.js`: 5 connections.
+* **Total Application Peak Utilization:** 50 connections (50% of server capacity).
+* **Headroom Remaining:** 50 connections reserved for administrative `psql` sessions, automated backups (`pg_dump`), Prisma migrations, and transient connection bursts.
+
+### 7.3 Configured Connection String
+In `.env` and `.env.example`:
+```env
+DATABASE_URL="postgresql://postgres:admin@localhost:5432/restopro_dev?schema=public&connection_limit=10&pool_timeout=20"
+```
+* `connection_limit=10`: Restricts this Prisma Client process to a maximum of 10 simultaneous pooled connections.
+* `pool_timeout=20`: Specifies a 20-second timeout to acquire a connection from the pool before rejecting the query with a timeout error.
+
+

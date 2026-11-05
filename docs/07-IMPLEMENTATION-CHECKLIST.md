@@ -70,15 +70,19 @@
   *Acceptance Criterion:* Verified: `npm run db:seed` provisions Tenant A (`111111111111111`) and Tenant B (`222222222222222`).
 - [x] **ST3-06:** Verify unique constraints and foreign key cascade rules in database.  
   *Acceptance Criterion:* Verified in `test/stage2-database-test.js` (P2002 on unique violations, P2003 on invalid FKs, Restrict on active orders).
+- [x] **ST3-07:** Enforce composite foreign key on `order_notifications(order_id, restaurant_id)` referencing `orders(id, restaurant_id)`.  
+  *Acceptance Criterion:* Verified via migration `20261105121500_enforce_notification_tenant_consistency` and `test/stage2-database-test.js` (matching insert succeeds, mismatched insert rejected with P2003).
+- [x] **ST3-08:** Configure connection pool capacity parameters and graceful shutdown lifecycle.  
+  *Acceptance Criterion:* Verified: PostgreSQL `max_connections = 100`, `connection_limit = 10` per worker budgeted for Hostinger VPS PM2 cluster, and graceful shutdown tested in `test/stage2-database-test.js`.
 
 ---
 
 ## Stage 4 — Single Restaurant Customer Ordering Engine
 
-- [x] **ST4-01:** Implement `src/services/tenant.service.js` for tenant resolution.  
-  *Acceptance Criterion:* Verified in `test/stage2-database-test.js`: resolves `restaurant_id` strictly from `metadata.phone_number_id`; rejects unknown/empty IDs; enforces `scopeQuery`.
-- [x] **ST4-02:** Implement event deduplication using `webhook_events` table.  
-  *Acceptance Criterion:* Verified in `test/stage2-database-test.js`: `event_key` unique constraint prevents duplicate processing across messages, concurrent storms, and status receipt collisions.
+- [ ] **ST4-01:** Implement `src/services/tenant.service.js` for tenant resolution.  
+  *Acceptance Criterion:* Correctly resolves `restaurant_id` from `metadata.phone_number_id`; rejects unknown IDs. (Foundational resolver built in Stage 2; pending full Stage 4 ordering integration)
+- [ ] **ST4-02:** Implement event deduplication using `webhook_events` table.  
+  *Acceptance Criterion:* Re-sending an identical `wamid` returns immediately without re-triggering logic. (Foundational deduplication built in Stage 2; pending full Stage 4 ordering integration)
 - [ ] **ST4-03:** Implement `src/services/whatsapp.service.js` for outbound messaging.  
   *Acceptance Criterion:* Successfully sends text messages and interactive catalog prompts via Meta Graph API.
 - [ ] **ST4-04:** Handle initial customer greeting ("Hi") in `conversation.service.js`.  

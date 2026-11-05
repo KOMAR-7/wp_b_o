@@ -229,3 +229,4 @@ Stage 2 (Database Foundation, Prisma Configuration, and Multi-Tenant Isolation) 
 2. **Conversation State Machine (`src/services/conversation.service.js`):** Persist session transitions (`AWAITING_CART` -> `AWAITING_ADDRESS` -> `CONFIRMING_ORDER`) in `conversation_sessions.state` JSONB.
 3. **Checkout Snapshotting:** Ensure line item prices submitted via Meta catalog order are snapshot into `Order.items` without mutating historical records.
 4. **Tenant Isolation Enforcement:** Continue mandatory usage of `TenantService.scopeQuery(restaurantId, query)` across all future service methods.
+
