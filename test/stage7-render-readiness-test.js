@@ -516,6 +516,17 @@ async function runStage7Tests() {
     assert(healthCheckRes.headers['x-frame-options'] === 'DENY', 'Security Header: X-Frame-Options is DENY');
     assert(healthCheckRes.headers['x-powered-by'] === undefined, 'Security Header: X-Powered-By is suppressed');
 
+    // Database Readiness check test
+    const readinessRes = await sendHttpRequest({
+      path: '/health/ready',
+      method: 'GET',
+      headers: proxyHeaders
+    });
+
+    assert(readinessRes.statusCode === 200, 'Render Router: GET /health/ready returns HTTP 200 on connected DB');
+    assert(readinessRes.body.status === 'ready', 'Render Router: Readiness status reports "ready"');
+    assert(readinessRes.body.database === 'connected', 'Render Router: Readiness database reports "connected"');
+
     // Test webhook signature verification through proxy headers
     const webhookPayload = {
       object: 'whatsapp_business_account',

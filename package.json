@@ -21,6 +21,7 @@
     "test:stage5:customer": "node test/stage5-customer-notification-test.js",
     "test:stage6": "node test/stage6-e2e-security-audit-test.js",
     "test:stage7": "node test/stage7-render-readiness-test.js",
+    "test:readiness": "node test/readiness-endpoint-test.js",
     "test:shutdown": "node test/graceful-shutdown-test.js",
     "db:seed": "node prisma/seed.js"
   },

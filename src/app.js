@@ -4,6 +4,7 @@
 const express = require('express');
 const { verifyWebhookSignature } = require('./middleware/verifyWebhook');
 const { handleGetVerification, handleIncomingEvent } = require('./controllers/webhook.controller');
+const prisma = require('./config/database');
 const logger = require('./utils/logger');
 
 const app = express();
@@ -43,6 +44,24 @@ app.get('/health', (req, res) => {
     service: 'RESTOPRO-WhatsApp-Backend',
     timestamp: new Date().toISOString()
   });
+});
+
+// Database readiness check endpoint
+app.get('/health/ready', async (req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    return res.status(200).json({
+      status: 'ready',
+      database: 'connected'
+    });
+  } catch (err) {
+    logger.error('Database readiness check failed', { error: err.message });
+    return res.status(503).json({
+      status: 'error',
+      database: 'disconnected',
+      error: 'Database unavailable'
+    });
+  }
 });
 
 // Root welcome endpoint
