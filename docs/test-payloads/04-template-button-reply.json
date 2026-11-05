@@ -1,0 +1,44 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "100293847561029",
+      "changes": [
+        {
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "15550123456",
+              "phone_number_id": "109876543210123"
+            },
+            "contacts": [
+              {
+                "profile": {
+                  "name": "Restaurant Owner"
+                },
+                "wa_id": "919811122233"
+              }
+            ],
+            "messages": [
+              {
+                "from": "919811122233",
+                "id": "wamid.HBgLMTQxMjU1NTA4MjkVAgASGBQzQUNCNjk5RDUwNUZGMUZEM0FDRkEA=",
+                "timestamp": "1730800120",
+                "type": "button",
+                "button": {
+                  "payload": "ORDER_ACCEPT_RP1024",
+                  "text": "Accept Order"
+                },
+                "context": {
+                  "from": "15550123456",
+                  "id": "wamid.HBgLMTQxMjU1NTA4MjkVAgASGBQzQUNCNjk5RDUwNUZGMUZEM0FEQ0EA="
+                }
+              }
+            ]
+          },
+          "field": "messages"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "100293847561029",
+      "changes": [
+        {
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "15550123456",
+              "phone_number_id": "109876543210123"
+            },
+            "contacts": [
+              {
+                "profile": {
+                  "name": "Omar Khan"
+                },
+                "wa_id": "919876543210"
+              }
+            ],
+            "messages": [
+              {
+                "from": "919876543210",
+                "id": "wamid.HBgLMTQxMjU1NTA4MjkVAgASGBQzQUNCNjk5RDUwNUZGMUZEM0FDRQA=",
+                "timestamp": "1730800090",
+                "type": "location",
+                "location": {
+                  "latitude": 19.1363257,
+                  "longitude": 72.8276601,
+                  "name": "Green Valley Apartments",
+                  "address": "Flat 302, Green Valley Apartments, Link Road, Andheri West, Mumbai 400053"
+                }
+              }
+            ]
+          },
+          "field": "messages"
+        }
+      ]
+    }
+  ]
+}

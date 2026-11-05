@@ -1,0 +1,54 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "100293847561029",
+      "changes": [
+        {
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "15550123456",
+              "phone_number_id": "109876543210123"
+            },
+            "contacts": [
+              {
+                "profile": {
+                  "name": "Omar Khan"
+                },
+                "wa_id": "919876543210"
+              }
+            ],
+            "messages": [
+              {
+                "from": "919876543210",
+                "id": "wamid.HBgLMTQxMjU1NTA4MjkVAgASGBQzQUNCNjk5RDUwNUZGMUZEM0FCRAA=",
+                "timestamp": "1730800045",
+                "type": "order",
+                "order": {
+                  "catalog_id": "987654321098765",
+                  "text": "Please make it spicy and send extra cutlery",
+                  "product_items": [
+                    {
+                      "product_retailer_id": "SKU_CHKN_BIRYANI_01",
+                      "quantity": 2,
+                      "item_price": 240,
+                      "currency": "INR"
+                    },
+                    {
+                      "product_retailer_id": "SKU_COLD_COFFEE_04",
+                      "quantity": 1,
+                      "item_price": 80,
+                      "currency": "INR"
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "field": "messages"
+        }
+      ]
+    }
+  ]
+}
