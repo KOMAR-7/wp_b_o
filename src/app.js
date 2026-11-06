@@ -4,6 +4,7 @@
 const express = require('express');
 const { verifyWebhookSignature } = require('./middleware/verifyWebhook');
 const { handleGetVerification, handleIncomingEvent } = require('./controllers/webhook.controller');
+const adminAuthRoutes = require('./routes/admin-auth.routes');
 const prisma = require('./config/database');
 const logger = require('./utils/logger');
 
@@ -78,6 +79,9 @@ app.get('/', (req, res) => {
 // Meta WhatsApp Webhook endpoints
 app.get('/api/webhook', handleGetVerification);
 app.post('/api/webhook', verifyWebhookSignature, handleIncomingEvent);
+
+// Super Admin Authentication endpoints
+app.use('/api/admin/auth', adminAuthRoutes);
 
 // 404 Handler
 app.use((req, res) => {

@@ -47,6 +47,32 @@ enum OutboxStatus {
   SUPPRESSED
 }
 
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  ONBOARDING
+  OFFBOARDED
+}
+
+enum SubscriptionStatus {
+  PENDING
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+enum PaymentMode {
+  UPI
+  BANK_TRANSFER
+  CASH
+  OTHER
+}
+
+enum PaymentStatus {
+  RECORDED
+  REVERSED
+}
+
 model Restaurant {
   id                     String                @id @default(uuid()) @db.Uuid
   name                   String                @db.VarChar(255)
@@ -58,12 +84,22 @@ model Restaurant {
   created_at             DateTime              @default(now()) @db.Timestamptz()
   updated_at             DateTime              @updatedAt @db.Timestamptz()
 
+  // Stage 9: Super Admin Metadata Extensions (all nullable for backward compatibility)
+  owner_name             String?               @db.VarChar(255)
+  email                  String?               @db.VarChar(255)
+  contact_number         String?               @db.VarChar(32)
+  address                String?               @db.Text
+  internal_notes         String?               @db.Text
+  tenant_status          TenantStatus          @default(ACTIVE)
+
   orders                 Order[]
   sessions               ConversationSession[]
   saved_addresses        SavedAddress[]
   webhook_events         WebhookEvent[]
   notifications          OrderNotification[]
   outbox_messages        OutboxMessage[]
+  subscriptions          Subscription[]
+  payments               Payment[]
 
   @@map("restaurants")
 }
@@ -190,4 +226,108 @@ model OutboxMessage {
   @@index([restaurant_id, status])
   @@index([restaurant_id, created_at])
   @@map("outbox_messages")
+}
+
+// =============================================================================
+// STAGE 9: SUPER ADMIN FOUNDATION MODELS
+// =============================================================================
+
+model AdminUser {
+  id            String         @id @default(uuid()) @db.Uuid
+  name          String         @db.VarChar(255)
+  email         String         @unique @db.VarChar(255)
+  password_hash String         @db.VarChar(255)
+  role          String         @default("SUPER_ADMIN") @db.VarChar(64)
+  is_active     Boolean        @default(true)
+  last_login_at DateTime?      @db.Timestamptz()
+  created_at    DateTime       @default(now()) @db.Timestamptz()
+  updated_at    DateTime       @updatedAt @db.Timestamptz()
+
+  sessions      AdminSession[]
+  audit_logs    AuditLog[]
+  recorded_payments Payment[]
+
+  @@map("admin_users")
+}
+
+model AdminSession {
+  id                 String    @id @default(uuid()) @db.Uuid
+  admin_id           String    @db.Uuid
+  session_token_hash String    @unique @db.VarChar(128)
+  ip_address         String?   @db.VarChar(64)
+  user_agent         String?   @db.Text
+  expires_at         DateTime  @db.Timestamptz()
+  created_at         DateTime  @default(now()) @db.Timestamptz()
+
+  admin              AdminUser @relation(fields: [admin_id], references: [id], onDelete: Cascade)
+
+  @@index([admin_id])
+  @@index([expires_at])
+  @@map("admin_sessions")
+}
+
+model Subscription {
+  id            String             @id @default(uuid()) @db.Uuid
+  restaurant_id String             @db.Uuid
+  plan_name     String             @db.VarChar(100)
+  amount        Decimal            @db.Decimal(10, 2)
+  currency      String             @default("INR") @db.Char(3)
+  start_date    DateTime           @db.Timestamptz()
+  end_date      DateTime           @db.Timestamptz()
+  status        SubscriptionStatus @default(PENDING)
+  notes         String?            @db.Text
+  created_at    DateTime           @default(now()) @db.Timestamptz()
+  updated_at    DateTime           @updatedAt @db.Timestamptz()
+
+  restaurant    Restaurant         @relation(fields: [restaurant_id], references: [id], onDelete: Cascade)
+  payments      Payment[]
+
+  @@index([restaurant_id, status])
+  @@index([status, end_date])
+  @@map("subscriptions")
+}
+
+model Payment {
+  id                    String        @id @default(uuid()) @db.Uuid
+  restaurant_id         String        @db.Uuid
+  subscription_id       String?       @db.Uuid
+  amount                Decimal       @db.Decimal(10, 2)
+  currency              String        @default("INR") @db.Char(3)
+  payment_date          DateTime      @default(now()) @db.Timestamptz()
+  payment_mode          PaymentMode   @default(BANK_TRANSFER)
+  transaction_reference String?       @db.VarChar(128)
+  status                PaymentStatus @default(RECORDED)
+  notes                 String?       @db.Text
+  recorded_by_admin_id  String?       @db.Uuid
+  original_payment_id   String?       @db.Uuid
+  created_at            DateTime      @default(now()) @db.Timestamptz()
+  updated_at            DateTime      @updatedAt @db.Timestamptz()
+
+  restaurant            Restaurant    @relation(fields: [restaurant_id], references: [id], onDelete: Cascade)
+  subscription          Subscription? @relation(fields: [subscription_id], references: [id], onDelete: SetNull)
+  recorded_by           AdminUser?    @relation(fields: [recorded_by_admin_id], references: [id], onDelete: SetNull)
+  original_payment      Payment?      @relation("PaymentReversals", fields: [original_payment_id], references: [id], onDelete: SetNull)
+  reversals             Payment[]     @relation("PaymentReversals")
+
+  @@index([restaurant_id, payment_date])
+  @@index([subscription_id])
+  @@index([status])
+  @@map("payments")
+}
+
+model AuditLog {
+  id            String     @id @default(uuid()) @db.Uuid
+  admin_user_id String?    @db.Uuid
+  action        String     @db.VarChar(128)
+  entity_type   String     @db.VarChar(64)
+  entity_id     String?    @db.VarChar(128)
+  metadata      Json?      @db.JsonB
+  created_at    DateTime   @default(now()) @db.Timestamptz()
+
+  admin_user    AdminUser? @relation(fields: [admin_user_id], references: [id], onDelete: SetNull)
+
+  @@index([admin_user_id])
+  @@index([entity_type, entity_id])
+  @@index([created_at])
+  @@map("audit_logs")
 }
