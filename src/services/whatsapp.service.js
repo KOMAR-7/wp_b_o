@@ -342,11 +342,324 @@ async function sendWhatsAppMessage({
   }
 }
 
+/**
+ * Builds Meta WhatsApp Cloud API v21.0 payload for customer conversational actions.
+ * Strictly adheres to Meta constraints:
+ * - Button titles: <= 20 chars
+ * - Max buttons: 3
+ * - List rows: <= 10 rows
+ * - List row title: <= 24 chars, description: <= 72 chars
+ * - Interactive body: <= 1024 chars
+ * - Text body: <= 4096 chars
+ *
+ * @param {Object} params
+ * @param {Object} params.action - Action object returned by conversation engine
+ * @param {string} params.recipientPhone - Customer WhatsApp phone number
+ * @param {string} [params.restaurantName=''] - Commercial restaurant name
+ * @param {string} [params.catalogId=null] - Optional catalog ID
+ * @returns {Object|null} Meta Cloud API payload object, or null if no outbound message needed
+ */
+function buildConversationReplyPayload({ action, recipientPhone, restaurantName = '', catalogId = null }) {
+  if (!action || typeof action !== 'object' || !action.type) {
+    return null;
+  }
+
+  if (action.type === 'SILENT_FALLBACK') {
+    return null;
+  }
+
+  if (!recipientPhone || typeof recipientPhone !== 'string') {
+    throw new Error('[WHATSAPP PAYLOAD ERROR] Missing recipientPhone.');
+  }
+
+  const cleanPhone = recipientPhone.replace(/[^\d]/g, '');
+  if (!cleanPhone) {
+    throw new Error('[WHATSAPP PAYLOAD ERROR] Recipient phone contains no digits.');
+  }
+
+  const rName = restaurantName ? restaurantName.trim() : '';
+  const footerText = rName ? `RESTOPRO • ${rName}`.slice(0, 60) : 'RESTOPRO';
+
+  // Defensive clamping to adhere to Meta character limitations
+  const clampBody = (text) => {
+    if (typeof text !== 'string') return '';
+    return text.length > 1024 ? `${text.slice(0, 1020)}...` : text;
+  };
+
+  switch (action.type) {
+    case 'SEND_WELCOME_CATALOG':
+    case 'REDIRECT_TO_CATALOG': {
+      let bodyText;
+      if (action.message) {
+        bodyText = action.message;
+      } else if (action.type === 'SEND_WELCOME_CATALOG') {
+        bodyText = rName
+          ? `Welcome to *${rName}*! 🥘\n\nPlease browse our menu catalogue to place your order.`
+          : 'Welcome! 🥘\n\nPlease browse our menu catalogue to place your order.';
+      } else {
+        bodyText = 'To select items or modify your order, please use our menu catalogue below.';
+      }
+
+      return {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: cleanPhone,
+        type: 'text',
+        text: {
+          preview_url: false,
+          body: bodyText.slice(0, 4096)
+        }
+      };
+    }
+
+    case 'PROMPT_ADDRESS_COLLECTION': {
+      const itemCount = action.itemCount || (Array.isArray(action.cart?.items) ? action.cart.items.length : null);
+      const subtotal = action.subtotal !== undefined ? action.subtotal : action.cart?.subtotal;
+      let bodyText = '';
+      if (itemCount !== null && subtotal !== undefined && subtotal !== null) {
+        bodyText += `🛒 *Cart Received:* ${itemCount} item(s) (₹${Number(subtotal).toFixed(2)})\n`;
+        bodyText += '━━━━━━━━━━━━━━━━━━━━\n';
+      }
+      bodyText += action.message || 'Please reply with your full delivery address (minimum 10 characters) or share your WhatsApp location pin 📍 so we know where to deliver your food.';
+
+      return {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: cleanPhone,
+        type: 'text',
+        text: {
+          preview_url: false,
+          body: bodyText.slice(0, 4096)
+        }
+      };
+    }
+
+    case 'PROMPT_ADDRESS_CHOICE': {
+      const saved = Array.isArray(action.savedAddresses) ? action.savedAddresses : [];
+      const bodyText = clampBody(
+        action.message || 'We found saved delivery addresses for your account. Please select whether to use a saved address or enter a new one:'
+      );
+
+      // If 1 or 2 saved addresses, send interactive buttons
+      if (saved.length <= 2) {
+        const buttons = [
+          {
+            type: 'reply',
+            reply: {
+              id: (saved.length === 1 && saved[0].id) ? `BTN_USE_SAVED_ADDRESS:${saved[0].id}` : 'BTN_USE_SAVED_ADDRESS',
+              title: '📍 Use Saved'.slice(0, 20)
+            }
+          },
+          {
+            type: 'reply',
+            reply: {
+              id: 'BTN_ENTER_NEW_ADDRESS',
+              title: '✍️ New Address'.slice(0, 20)
+            }
+          }
+        ];
+
+        return {
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: cleanPhone,
+          type: 'interactive',
+          interactive: {
+            type: 'button',
+            body: { text: bodyText },
+            footer: { text: footerText },
+            action: { buttons }
+          }
+        };
+      }
+
+      // If > 2 saved addresses, send interactive list (up to 9 saved + 1 new address option = 10 rows max)
+      const rows = saved.slice(0, 9).map((addr, idx) => ({
+        id: `ADDR_SAVED_${addr.id}`.slice(0, 200),
+        title: (addr.label || `Address ${idx + 1}`).slice(0, 24),
+        description: (addr.address || '').slice(0, 72)
+      }));
+
+      rows.push({
+        id: 'BTN_ENTER_NEW_ADDRESS',
+        title: 'Enter New Address'.slice(0, 24),
+        description: 'Provide a different delivery address'.slice(0, 72)
+      });
+
+      return {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: cleanPhone,
+        type: 'interactive',
+        interactive: {
+          type: 'list',
+          body: { text: bodyText },
+          footer: { text: footerText },
+          action: {
+            button: 'Select Address'.slice(0, 20),
+            sections: [
+              {
+                title: 'Saved Addresses'.slice(0, 24),
+                rows
+              }
+            ]
+          }
+        }
+      };
+    }
+
+    case 'PROMPT_SAVE_CONSENT':
+    case 'VALID_TEXT_INPUT': {
+      const addressText = action.address?.addressText || '';
+      let bodyText = action.message;
+      if (!bodyText) {
+        bodyText = addressText
+          ? `📍 *Delivery Address:*\n${addressText}\n\nWould you like to save this address for future orders?`
+          : 'Would you like to save this delivery address for your future orders?';
+      }
+
+      return {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: cleanPhone,
+        type: 'interactive',
+        interactive: {
+          type: 'button',
+          body: { text: clampBody(bodyText) },
+          footer: { text: footerText },
+          action: {
+            buttons: [
+              {
+                type: 'reply',
+                reply: {
+                  id: 'BTN_CONSENT_YES',
+                  title: '✅ Yes, Save'.slice(0, 20)
+                }
+              },
+              {
+                type: 'reply',
+                reply: {
+                  id: 'BTN_CONSENT_NO',
+                  title: '❌ No, Just Once'.slice(0, 20)
+                }
+              }
+            ]
+          }
+        }
+      };
+    }
+
+    case 'PROMPT_ORDER_TYPE': {
+      const bodyText = action.message || 'Please select your order type:\n\n🚚 Delivery\n🥡 Takeaway (Self-Pickup)';
+
+      return {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: cleanPhone,
+        type: 'interactive',
+        interactive: {
+          type: 'button',
+          body: { text: clampBody(bodyText) },
+          footer: { text: footerText },
+          action: {
+            buttons: [
+              {
+                type: 'reply',
+                reply: {
+                  id: 'BTN_ORDER_DELIVERY',
+                  title: '🚚 Delivery'.slice(0, 20)
+                }
+              },
+              {
+                type: 'reply',
+                reply: {
+                  id: 'BTN_ORDER_TAKEAWAY',
+                  title: '🥡 Takeaway'.slice(0, 20)
+                }
+              }
+            ]
+          }
+        }
+      };
+    }
+
+    case 'PROMPT_ORDER_CONFIRMATION': {
+      const summaryText = action.summary?.summaryText || action.message || 'Please review and confirm your order:';
+      const actionButtons = Array.isArray(action.buttons) && action.buttons.length > 0
+        ? action.buttons
+        : [
+            { id: `BTN_CONFIRM_ORDER:${action.confirmationToken || ''}`, title: '✅ Confirm Order' },
+            { id: 'BTN_CANCEL_ORDER', title: '❌ Cancel Order' }
+          ];
+
+      // Meta limits: max 3 buttons, title <= 20 chars, id <= 256 chars
+      const buttons = actionButtons.slice(0, 3).map(b => ({
+        type: 'reply',
+        reply: {
+          id: String(b.id).slice(0, 256),
+          title: String(b.title).slice(0, 20)
+        }
+      }));
+
+      return {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: cleanPhone,
+        type: 'interactive',
+        interactive: {
+          type: 'button',
+          body: { text: clampBody(summaryText) },
+          footer: { text: footerText },
+          action: { buttons }
+        }
+      };
+    }
+
+    case 'VALID_LOCATION_INPUT':
+    case 'PROMPT_ROOM_NUMBER':
+    case 'PROMPT_ADDRESS_INPUT':
+    case 'ORDER_CONFIRMED':
+    case 'ORDER_CANCELLED':
+    case 'CONTEXTUAL_REPROMPT': {
+      const bodyText = action.message || 'Please follow the on-screen options to continue your order.';
+
+      return {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: cleanPhone,
+        type: 'text',
+        text: {
+          preview_url: false,
+          body: bodyText.slice(0, 4096)
+        }
+      };
+    }
+
+    default: {
+      // If action has a message string, fallback to safe text reply
+      if (typeof action.message === 'string' && action.message.trim()) {
+        return {
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: cleanPhone,
+          type: 'text',
+          text: {
+            preview_url: false,
+            body: action.message.trim().slice(0, 4096)
+          }
+        };
+      }
+      return null;
+    }
+  }
+}
+
 module.exports = {
   META_GRAPH_VERSION,
   DEFAULT_TIMEOUT_MS,
   buildOwnerNotificationPayload,
   buildCustomerDecisionNotificationPayload,
+  buildConversationReplyPayload,
   resolveRestaurantCredentials,
   sendWhatsAppMessage
 };

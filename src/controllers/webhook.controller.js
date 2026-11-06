@@ -8,6 +8,7 @@ const { recordIncomingEvent, markEventCompleted, markEventFailed } = require('..
 const { resolveTenantByPhoneNumberId } = require('../services/tenant.service');
 const { handleIncomingMessage } = require('../services/conversation.service');
 const { processOwnerOrderDecision } = require('../services/order.service');
+const { enqueueConversationReply } = require('../services/outbox.service');
 const logger = require('../utils/logger');
 
 /**
@@ -146,6 +147,26 @@ async function handleIncomingEvent(req, res) {
             await markEventFailed(eventRecord.id, `Engine error: ${engineResult.error}`);
           }
           continue;
+        }
+
+        // Enqueue outbound conversational reply if an actionable response was generated
+        if (engineResult.action && engineResult.action.type !== 'SILENT_FALLBACK') {
+          try {
+            await enqueueConversationReply({
+              restaurantId: tenant.id,
+              customerPhone: event.senderPhone,
+              action: engineResult.action,
+              inboundMessageId: event.messageId,
+              restaurantName: tenant.name
+            });
+          } catch (replyErr) {
+            logger.error('Failed to enqueue conversational reply into outbox', {
+              phoneNumberId: event.phoneNumberId,
+              senderPhone: event.senderPhone,
+              actionType: engineResult.action?.type,
+              error: replyErr.message
+            });
+          }
         }
 
         if (eventRecord) {

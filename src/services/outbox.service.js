@@ -13,10 +13,130 @@
 const crypto = require('crypto');
 const prisma = require('../config/database');
 const logger = require('../utils/logger');
-const { resolveRestaurantCredentials, sendWhatsAppMessage } = require('./whatsapp.service');
+const { resolveRestaurantCredentials, sendWhatsAppMessage, buildConversationReplyPayload } = require('./whatsapp.service');
 
 const DEFAULT_LEASE_TTL_MS = 60 * 1000; // 60 seconds lease TTL
 const DEFAULT_MAX_ATTEMPTS = 5;
+
+/**
+ * Lazily invokes in-process worker cycle trigger to prevent circular module dependencies.
+ */
+function notifyWorkerCycle() {
+  try {
+    const workerModule = require('../jobs/notification-worker');
+    if (typeof workerModule.triggerWorkerCycle === 'function') {
+      workerModule.triggerWorkerCycle();
+    }
+  } catch (err) {
+    logger.debug('Worker trigger skipped', { reason: err.message });
+  }
+}
+
+/**
+ * Persists an outbound conversational reply into outbox_messages table.
+ * Idempotency is enforced using inbound event.messageId (e.g. reply_wamid.xxx).
+ *
+ * @param {Object} params
+ * @param {string} params.restaurantId - Restaurant tenant UUID
+ * @param {string} params.customerPhone - Customer phone string
+ * @param {Object} params.action - Action object returned by conversation engine
+ * @param {string} [params.inboundMessageId] - Inbound WhatsApp message ID
+ * @param {string} [params.restaurantName=''] - Commercial restaurant name
+ * @param {Object} [params.txClient] - Optional Prisma transaction client
+ * @returns {Promise<Object|null>} Created OutboxMessage or null if no reply needed
+ */
+async function enqueueConversationReply({
+  restaurantId,
+  customerPhone,
+  action,
+  inboundMessageId = null,
+  restaurantName = '',
+  txClient = null
+}) {
+  if (!restaurantId || typeof restaurantId !== 'string') {
+    throw new Error('[OUTBOX ERROR] enqueueConversationReply requires valid restaurantId');
+  }
+
+  if (!customerPhone || typeof customerPhone !== 'string') {
+    throw new Error('[OUTBOX ERROR] enqueueConversationReply requires valid customerPhone');
+  }
+
+  if (!action || typeof action !== 'object' || action.type === 'SILENT_FALLBACK') {
+    return null;
+  }
+
+  const payload = buildConversationReplyPayload({
+    action,
+    recipientPhone: customerPhone,
+    restaurantName
+  });
+
+  if (!payload) {
+    logger.debug('No outbound payload generated for conversational action; skipping outbox enqueue', {
+      restaurantId,
+      actionType: action.type
+    });
+    return null;
+  }
+
+  const cleanCustomerPhone = customerPhone.replace(/[^\d]/g, '');
+  const cleanMsgId = (typeof inboundMessageId === 'string' && inboundMessageId.trim())
+    ? inboundMessageId.trim()
+    : `${restaurantId.slice(0, 8)}_${cleanCustomerPhone}_${Date.now()}`;
+  const idempotencyKey = `reply_${cleanMsgId}`.slice(0, 128);
+
+  const db = txClient || prisma;
+
+  try {
+    const outboxMessage = await db.outboxMessage.create({
+      data: {
+        restaurant_id: restaurantId,
+        recipient_phone: cleanCustomerPhone,
+        message_type: 'CUSTOMER_CONVERSATION_REPLY',
+        payload,
+        idempotency_key: idempotencyKey,
+        status: 'PENDING'
+      }
+    });
+
+    logger.info('Customer conversational reply enqueued into outbox', {
+      outboxId: outboxMessage.id,
+      restaurantId,
+      recipientPhone: cleanCustomerPhone,
+      actionType: action.type,
+      idempotencyKey
+    });
+
+    // Notify in-process background worker to trigger an immediate cycle
+    notifyWorkerCycle();
+
+    return outboxMessage;
+  } catch (err) {
+    const isDuplicateKey = err.code === 'P2002' && (
+      (Array.isArray(err.meta?.target) && err.meta.target.includes('idempotency_key')) ||
+      (typeof err.meta?.target === 'string' && err.meta.target.includes('idempotency_key')) ||
+      (err.message && err.message.includes('idempotency_key'))
+    );
+
+    if (isDuplicateKey) {
+      logger.info('Duplicate conversational reply prevented by idempotency key', {
+        idempotencyKey,
+        restaurantId,
+        actionType: action.type
+      });
+      return await db.outboxMessage.findUnique({
+        where: { idempotency_key: idempotencyKey }
+      });
+    }
+
+    logger.error('Failed to enqueue conversational reply into outbox', {
+      error: err.message,
+      restaurantId,
+      actionType: action.type
+    });
+    throw err;
+  }
+}
 
 /**
  * Claims a batch of pending outbox messages within a short database transaction.
@@ -318,6 +438,7 @@ module.exports = {
   DEFAULT_MAX_ATTEMPTS,
   claimPendingOutboxMessages,
   updateOutboxResult,
-  dispatchPendingOutboxMessages
+  dispatchPendingOutboxMessages,
+  enqueueConversationReply
 };
 

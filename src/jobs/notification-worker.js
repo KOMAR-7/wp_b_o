@@ -87,11 +87,25 @@ class NotificationWorker {
   }
 
   /**
+   * Triggers an immediate processing cycle if worker is idle, without waiting for next poll tick.
+   */
+  triggerImmediateCycle(customSender = null) {
+    if (this.isRunning && !this.isProcessing) {
+      setImmediate(() => {
+        this.processCycle(customSender).catch(err => {
+          logger.warn('Immediate outbox cycle warning', { error: err.message });
+        });
+      });
+    }
+  }
+
+  /**
    * Starts the continuous background polling loop.
    */
   start(customSender = null) {
     if (this.isRunning) return;
     this.isRunning = true;
+    setActiveWorker(this);
 
     logger.info('Starting RESTOPRO Render Notification Worker', {
       workerId: this.workerId,
@@ -117,6 +131,8 @@ class NotificationWorker {
    */
   async stop() {
     this.isRunning = false;
+    setActiveWorker(null);
+
     if (this.pollTimer) {
       clearTimeout(this.pollTimer);
       this.pollTimer = null;
@@ -130,6 +146,23 @@ class NotificationWorker {
     }
 
     logger.info('Notification worker stopped cleanly', { workerId: this.workerId });
+  }
+}
+
+// Module-level worker instance tracking for instantaneous cycle triggers
+let activeWorkerInstance = null;
+
+function setActiveWorker(worker) {
+  activeWorkerInstance = worker;
+}
+
+function getActiveWorker() {
+  return activeWorkerInstance;
+}
+
+function triggerWorkerCycle(customSender = null) {
+  if (activeWorkerInstance) {
+    activeWorkerInstance.triggerImmediateCycle(customSender);
   }
 }
 
@@ -155,6 +188,9 @@ if (require.main === module) {
 }
 
 module.exports = {
-  NotificationWorker
+  NotificationWorker,
+  setActiveWorker,
+  getActiveWorker,
+  triggerWorkerCycle
 };
 

@@ -5,6 +5,16 @@ const app = require('./app');
 const config = require('./config/env');
 const logger = require('./utils/logger');
 const prisma = require('./config/database');
+const { NotificationWorker } = require('./jobs/notification-worker');
+
+let worker = null;
+
+// Start in-process notification worker unless explicitly disabled or running isolated tests
+if (process.env.ENABLE_BACKGROUND_WORKER !== 'false' && process.env.NODE_ENV !== 'test') {
+  worker = new NotificationWorker();
+  worker.start();
+  logger.info('In-process NotificationWorker started alongside Express HTTP server.');
+}
 
 const server = app.listen(config.port, '0.0.0.0', () => {
   logger.info(`RESTOPRO Backend listening on port ${config.port}`, {
@@ -17,6 +27,16 @@ const server = app.listen(config.port, '0.0.0.0', () => {
 
 async function gracefulShutdown(signal) {
   logger.info(`Received ${signal}. Shutting down HTTP server gracefully...`);
+
+  // Stop background worker first so in-flight work completes and polling halts
+  if (worker) {
+    try {
+      await worker.stop();
+      logger.info('In-process NotificationWorker stopped cleanly.');
+    } catch (wErr) {
+      logger.warn('Warning during notification worker stop', { error: wErr.message });
+    }
+  }
 
   // Close idle keep-alive connections if supported (Node.js 18.2+)
   if (typeof server.closeIdleConnections === 'function') {
@@ -48,5 +68,7 @@ process.on('message', (msg) => {
     gracefulShutdown('PM2_SHUTDOWN');
   }
 });
+
+server.worker = worker;
 
 module.exports = server;
