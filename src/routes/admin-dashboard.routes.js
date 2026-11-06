@@ -20,3 +20,4 @@ router.get('/stats', handleGetDashboardStats);
 router.get('/activity', handleGetRecentActivity);
 
 module.exports = router;
+

@@ -462,3 +462,4 @@ module.exports = {
   updateRestaurantStatus,
   sanitizeRestaurant
 };
+

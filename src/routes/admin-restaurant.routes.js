@@ -33,3 +33,4 @@ router.put('/:id', handleUpdateRestaurant);
 router.patch('/:id/status', handleUpdateRestaurantStatus);
 
 module.exports = router;
+

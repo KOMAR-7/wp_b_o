@@ -14,3 +14,4 @@ router.use(requireSuperAdminAuth);
 router.get('/', handleListAuditLogs);
 
 module.exports = router;
+

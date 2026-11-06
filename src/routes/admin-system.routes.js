@@ -14,3 +14,4 @@ router.use(requireSuperAdminAuth);
 router.get('/database', handleGetDatabaseOverview);
 
 module.exports = router;
+

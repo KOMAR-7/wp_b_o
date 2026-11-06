@@ -33,3 +33,4 @@ router.put('/:id', handleUpdateSubscription);
 router.patch('/:id/status', handleUpdateSubscriptionStatus);
 
 module.exports = router;
+
