@@ -12,6 +12,7 @@ const axios = require('axios');
 const prisma = require('../config/database');
 const config = require('../config/env');
 const logger = require('../utils/logger');
+const { decryptToken } = require('../utils/crypto');
 
 const META_GRAPH_VERSION = 'v21.0';
 const DEFAULT_TIMEOUT_MS = 10000;
@@ -231,8 +232,14 @@ async function resolveRestaurantCredentials(restaurantId, db = prisma) {
   }
 
   let accessToken = restaurant.access_token_encrypted;
-  // If token is mocked or missing in dev/test, fall back to environment token
-  if (!accessToken || accessToken.startsWith('mock_')) {
+  if (accessToken && accessToken.startsWith('enc:v1:')) {
+    try {
+      accessToken = decryptToken(accessToken);
+    } catch (decryptErr) {
+      logger.error('Failed to decrypt restaurant access token', { restaurantId, error: decryptErr.message });
+      throw new Error(`[CREDENTIAL ERROR] Failed to decrypt WhatsApp access token for "${restaurant.name}".`);
+    }
+  } else if (!accessToken || accessToken.startsWith('mock_')) {
     accessToken = config.meta.accessToken || accessToken || 'mock_access_token';
   }
 

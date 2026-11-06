@@ -1,0 +1,927 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RESTOPRO — Super Admin Panel</title>
+  <link rel="stylesheet" href="/admin/styles.css">
+</head>
+<body>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- VIEW 1: AUTHENTICATION / LOGIN -->
+  <div id="login-view" class="auth-wrapper">
+    <div class="auth-card">
+      <div class="auth-header">
+        <div class="auth-logo">RESTOPRO</div>
+        <h1 class="auth-title">Super Admin Portal</h1>
+        <p class="auth-subtitle">Platform Owner Administrative Console</p>
+      </div>
+
+      <div id="login-error-alert" class="alert alert-error" style="display: none;"></div>
+
+      <form id="login-form">
+        <div class="form-group">
+          <label for="login-email">Admin Email</label>
+          <input type="email" id="login-email" class="form-control" placeholder="admin@restopro.com" required autocomplete="email">
+        </div>
+
+        <div class="form-group">
+          <label for="login-password">Password</label>
+          <div class="password-input-wrapper">
+            <input type="password" id="login-password" class="form-control" placeholder="••••••••••••" required autocomplete="current-password">
+            <button type="button" id="toggle-password-btn" class="password-toggle-btn" aria-label="Toggle password visibility">Show</button>
+          </div>
+        </div>
+
+        <button type="submit" id="login-submit-btn" class="btn btn-primary btn-block">
+          <span class="btn-text">Sign In</span>
+          <span class="btn-spinner" style="display: none;"></span>
+        </button>
+      </form>
+
+      <div class="auth-footer">
+        Strictly restricted to RESTOPRO platform administrators.
+      </div>
+    </div>
+  </div>
+
+  <!-- VIEW 2: APPLICATION DASHBOARD -->
+  <div id="app-view" class="app-wrapper" style="display: none;">
+    
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <span class="brand-badge">PRO</span>
+        <span class="brand-name">RESTOPRO</span>
+      </div>
+
+      <nav class="sidebar-nav">
+        <a href="#dashboard" class="nav-item active" data-tab="dashboard">
+          <span class="nav-icon">📊</span> Dashboard
+        </a>
+        <a href="#restaurants" class="nav-item" data-tab="restaurants">
+          <span class="nav-icon">🍽️</span> Restaurants
+        </a>
+        <a href="#subscriptions" class="nav-item" data-tab="subscriptions">
+          <span class="nav-icon">📅</span> Subscriptions
+        </a>
+        <a href="#payments" class="nav-item" data-tab="payments">
+          <span class="nav-icon">💳</span> Payments
+        </a>
+        <a href="#audit-logs" class="nav-item" data-tab="audit-logs">
+          <span class="nav-icon">📜</span> Audit Logs
+        </a>
+        <a href="#system" class="nav-item" data-tab="system">
+          <span class="nav-icon">⚙️</span> Database & System
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="admin-profile-pill">
+          <div class="admin-avatar">SA</div>
+          <div class="admin-info">
+            <span id="header-admin-name" class="admin-name">Platform Admin</span>
+            <span id="header-admin-email" class="admin-email">admin@restopro.com</span>
+          </div>
+        </div>
+        <button id="logout-btn" class="btn btn-outline btn-block btn-sm" title="Log out">
+          Sign Out
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      
+      <!-- Top Bar -->
+      <header class="topbar">
+        <h2 id="page-heading" class="page-title">Dashboard Overview</h2>
+        <div class="topbar-actions">
+          <span id="system-health-badge" class="badge badge-success">API Online</span>
+        </div>
+      </header>
+
+      <!-- TAB 1: DASHBOARD -->
+      <section id="tab-dashboard" class="tab-pane active">
+        <!-- Stat Cards Grid -->
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-header">
+              <span class="stat-label">Total Restaurants</span>
+              <span class="stat-tag">All Time</span>
+            </div>
+            <div id="stat-total-restaurants" class="stat-value">0</div>
+            <div class="stat-footer">
+              <span id="stat-active-restaurants" class="badge badge-success">0 Active</span>
+              <span id="stat-suspended-restaurants" class="badge badge-danger">0 Suspended</span>
+            </div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-header">
+              <span class="stat-label">Active Subscriptions</span>
+              <span class="stat-tag">Revenue Active</span>
+            </div>
+            <div id="stat-active-subs" class="stat-value">0</div>
+            <div class="stat-footer">
+              <span id="stat-expiring-soon" class="badge badge-warning">0 Expiring ≤30d</span>
+            </div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-header">
+              <span class="stat-label">Recorded Payments</span>
+              <span class="stat-tag">Offline Valid</span>
+            </div>
+            <div id="stat-total-payments" class="stat-value">₹0</div>
+            <div class="stat-footer">
+              <span id="stat-payments-count" class="text-muted">0 entries recorded</span>
+            </div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-header">
+              <span class="stat-label">Outstanding Balance</span>
+              <span class="stat-tag">Active Receivables</span>
+            </div>
+            <div id="stat-outstanding-balance" class="stat-value text-amber">₹0</div>
+            <div class="stat-footer">
+              <span id="stat-reversed-payments" class="badge badge-secondary">₹0 Reversed</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Dashboard Layout: Recent Activity -->
+        <div class="panel mt-4">
+          <div class="panel-header">
+            <h3 class="panel-title">Recent Platform Activity</h3>
+            <button id="refresh-activity-btn" class="btn btn-outline btn-sm">Refresh</button>
+          </div>
+          <div class="panel-body">
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Action</th>
+                    <th>Entity</th>
+                    <th>Entity ID</th>
+                    <th>Admin User</th>
+                    <th>Details</th>
+                  </tr>
+                </thead>
+                <tbody id="activity-table-body">
+                  <tr><td colspan="6" class="text-center text-muted">Loading activity...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2: RESTAURANTS -->
+      <section id="tab-restaurants" class="tab-pane">
+        <div class="panel">
+          <div class="panel-header">
+            <h3 class="panel-title">Restaurant Clients</h3>
+            <button id="open-create-restaurant-btn" class="btn btn-primary">+ Onboard Restaurant</button>
+          </div>
+
+          <div class="panel-toolbar">
+            <div class="search-box">
+              <input type="text" id="restaurants-search-input" class="form-control" placeholder="Search by name, phone_number_id, owner, email...">
+            </div>
+            <div class="filter-box">
+              <select id="restaurants-status-filter" class="form-control">
+                <option value="">All Statuses</option>
+                <option value="ACTIVE">ACTIVE</option>
+                <option value="SUSPENDED">SUSPENDED</option>
+                <option value="ONBOARDING">ONBOARDING</option>
+                <option value="OFFBOARDED">OFFBOARDED</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="panel-body">
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Restaurant</th>
+                    <th>Owner</th>
+                    <th>Meta Phone Number ID</th>
+                    <th>WABA ID</th>
+                    <th>Status</th>
+                    <th>Webhook Active</th>
+                    <th>Subscription</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="restaurants-table-body">
+                  <tr><td colspan="8" class="text-center text-muted">Loading restaurants...</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div id="restaurants-pagination" class="pagination-bar"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 3: SUBSCRIPTIONS -->
+      <section id="tab-subscriptions" class="tab-pane">
+        <div class="panel">
+          <div class="panel-header">
+            <h3 class="panel-title">Client Subscriptions</h3>
+            <button id="open-create-sub-btn" class="btn btn-primary">+ New Subscription</button>
+          </div>
+
+          <div class="panel-toolbar">
+            <div class="search-box">
+              <input type="text" id="subscriptions-search-input" class="form-control" placeholder="Search by plan name or restaurant...">
+            </div>
+            <div class="filter-box">
+              <select id="subscriptions-status-filter" class="form-control">
+                <option value="">All Statuses</option>
+                <option value="ACTIVE">ACTIVE</option>
+                <option value="PENDING">PENDING</option>
+                <option value="EXPIRED">EXPIRED</option>
+                <option value="CANCELLED">CANCELLED</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="panel-body">
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Restaurant</th>
+                    <th>Plan Name</th>
+                    <th>Amount</th>
+                    <th>Validity Period</th>
+                    <th>Remaining Days</th>
+                    <th>Status</th>
+                    <th>Paid</th>
+                    <th>Outstanding</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="subscriptions-table-body">
+                  <tr><td colspan="9" class="text-center text-muted">Loading subscriptions...</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div id="subscriptions-pagination" class="pagination-bar"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 4: PAYMENTS -->
+      <section id="tab-payments" class="tab-pane">
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <h3 class="panel-title">Payment Records</h3>
+              <p class="panel-subtitle">Manually recorded offline payments from restaurant tenants</p>
+            </div>
+            <button id="open-record-payment-btn" class="btn btn-primary">+ Record Payment</button>
+          </div>
+
+          <div class="panel-toolbar">
+            <div class="filter-box">
+              <select id="payments-mode-filter" class="form-control">
+                <option value="">All Payment Modes</option>
+                <option value="UPI">UPI</option>
+                <option value="BANK_TRANSFER">Bank Transfer / NEFT</option>
+                <option value="CASH">Cash</option>
+                <option value="OTHER">Other</option>
+              </select>
+            </div>
+            <div class="filter-box">
+              <select id="payments-status-filter" class="form-control">
+                <option value="">All Statuses</option>
+                <option value="RECORDED">RECORDED (Valid)</option>
+                <option value="REVERSED">REVERSED (Reversed)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="panel-body">
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Restaurant</th>
+                    <th>Subscription Plan</th>
+                    <th>Amount</th>
+                    <th>Mode</th>
+                    <th>Reference</th>
+                    <th>Status</th>
+                    <th>Recorded By</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="payments-table-body">
+                  <tr><td colspan="9" class="text-center text-muted">Loading payments...</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div id="payments-pagination" class="pagination-bar"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 5: AUDIT LOGS -->
+      <section id="tab-audit-logs" class="tab-pane">
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <h3 class="panel-title">Audit Logs</h3>
+              <p class="panel-subtitle">Append-only administrative action trail for platform security</p>
+            </div>
+            <button id="refresh-audit-logs-btn" class="btn btn-outline btn-sm">Refresh</button>
+          </div>
+
+          <div class="panel-toolbar">
+            <div class="filter-box">
+              <select id="audit-action-filter" class="form-control">
+                <option value="">All Actions</option>
+                <option value="RESTAURANT_ONBOARDED">RESTAURANT_ONBOARDED</option>
+                <option value="RESTAURANT_UPDATED">RESTAURANT_UPDATED</option>
+                <option value="RESTAURANT_STATUS_CHANGED">RESTAURANT_STATUS_CHANGED</option>
+                <option value="SUBSCRIPTION_CREATED">SUBSCRIPTION_CREATED</option>
+                <option value="SUBSCRIPTION_UPDATED">SUBSCRIPTION_UPDATED</option>
+                <option value="SUBSCRIPTION_STATUS_CHANGED">SUBSCRIPTION_STATUS_CHANGED</option>
+                <option value="PAYMENT_RECORDED">PAYMENT_RECORDED</option>
+                <option value="PAYMENT_REVERSED">PAYMENT_REVERSED</option>
+                <option value="ADMIN_LOGIN_SUCCESS">ADMIN_LOGIN_SUCCESS</option>
+                <option value="ADMIN_LOGIN_FAILED">ADMIN_LOGIN_FAILED</option>
+                <option value="ADMIN_LOGOUT">ADMIN_LOGOUT</option>
+              </select>
+            </div>
+            <div class="filter-box">
+              <select id="audit-entity-filter" class="form-control">
+                <option value="">All Entity Types</option>
+                <option value="Restaurant">Restaurant</option>
+                <option value="Subscription">Subscription</option>
+                <option value="Payment">Payment</option>
+                <option value="AdminUser">AdminUser</option>
+                <option value="AdminSession">AdminSession</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="panel-body">
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Action</th>
+                    <th>Entity Type</th>
+                    <th>Entity ID</th>
+                    <th>Admin</th>
+                    <th>Details</th>
+                  </tr>
+                </thead>
+                <tbody id="audit-logs-table-body">
+                  <tr><td colspan="6" class="text-center text-muted">Loading audit logs...</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div id="audit-logs-pagination" class="pagination-bar"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 6: SYSTEM & DATABASE -->
+      <section id="tab-system" class="tab-pane">
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <h3 class="panel-title">System & Database Status</h3>
+              <p class="panel-subtitle">Operational metrics and entity counts (Sanitized & Read-Only)</p>
+            </div>
+            <button id="refresh-system-btn" class="btn btn-outline btn-sm">Refresh Status</button>
+          </div>
+
+          <div class="panel-body">
+            <div class="system-grid">
+              <!-- DB Status Card -->
+              <div class="stat-card">
+                <div class="stat-header">
+                  <span class="stat-label">Database Connection</span>
+                  <span id="sys-db-status" class="badge badge-success">Connected</span>
+                </div>
+                <div id="sys-db-latency" class="stat-value">0 ms</div>
+                <div class="stat-footer">
+                  <span id="sys-db-provider" class="text-muted">PostgreSQL Engine</span>
+                </div>
+              </div>
+
+              <!-- Migrations Card -->
+              <div class="stat-card">
+                <div class="stat-header">
+                  <span class="stat-label">Applied Migrations</span>
+                  <span class="badge badge-info">Prisma Schema</span>
+                </div>
+                <div id="sys-migrations-count" class="stat-value">0</div>
+                <div class="stat-footer">
+                  <span class="text-muted">All migrations applied</span>
+                </div>
+              </div>
+
+              <!-- Uptime Card -->
+              <div class="stat-card">
+                <div class="stat-header">
+                  <span class="stat-label">Server Uptime</span>
+                  <span id="sys-node-version" class="stat-tag">Node</span>
+                </div>
+                <div id="sys-uptime" class="stat-value">0h 0m</div>
+                <div class="stat-footer">
+                  <span id="sys-memory" class="text-muted">RAM: 0 MB RSS</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Database Entity Count Table -->
+            <div class="mt-4">
+              <h4 class="section-title">Database Table Entity Counts</h4>
+              <div class="entity-counts-grid" id="entity-counts-container">
+                <!-- Dynamically rendered -->
+              </div>
+            </div>
+
+            <div class="alert alert-info mt-4">
+              <strong>Security Invariant:</strong> Database credentials, connection strings, Meta access tokens, and raw SQL consoles are strictly blocked from the Super Admin interface to safeguard production data integrity.
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODALS -->
+  <!-- ========================================================================= -->
+
+  <!-- MODAL: Onboard Restaurant -->
+  <div id="modal-create-restaurant" class="modal-backdrop" style="display: none;">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title">Onboard New Restaurant</h3>
+        <button class="modal-close-btn" data-close="modal-create-restaurant">&times;</button>
+      </div>
+      <form id="form-create-restaurant">
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label>Restaurant Name *</label>
+              <input type="text" name="name" class="form-control" required placeholder="e.g. Spice Garden Bistro">
+            </div>
+            <div class="form-group col-6">
+              <label>Owner Name</label>
+              <input type="text" name="owner_name" class="form-control" placeholder="e.g. Rajesh Sharma">
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label>Owner Phone (WhatsApp) *</label>
+              <input type="text" name="owner_phone" class="form-control" required placeholder="+919876543210">
+            </div>
+            <div class="form-group col-6">
+              <label>Email Address</label>
+              <input type="email" name="email" class="form-control" placeholder="billing@spicegarden.in">
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label>Secondary Contact</label>
+              <input type="text" name="contact_number" class="form-control" placeholder="+919811122233">
+            </div>
+            <div class="form-group col-6">
+              <label>Initial Status</label>
+              <select name="tenant_status" class="form-control">
+                <option value="ACTIVE">ACTIVE (Receives Webhooks)</option>
+                <option value="ONBOARDING" selected>ONBOARDING (Setup Mode)</option>
+                <option value="SUSPENDED">SUSPENDED</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Commercial Address</label>
+            <input type="text" name="address" class="form-control" placeholder="123 MG Road, Bengaluru, Karnataka">
+          </div>
+
+          <div class="form-divider">Meta WhatsApp Cloud API Identifiers</div>
+
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label>Meta Phone Number ID *</label>
+              <input type="text" name="phone_number_id" class="form-control" required placeholder="e.g. 104829104829104">
+              <small class="form-hint">From Meta Developer Dashboard</small>
+            </div>
+            <div class="form-group col-6">
+              <label>Meta WABA ID *</label>
+              <input type="text" name="waba_id" class="form-control" required placeholder="e.g. 209482094820948">
+              <small class="form-hint">WhatsApp Business Account ID</small>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>WhatsApp Permanent Access Token</label>
+            <input type="password" name="access_token" class="form-control" placeholder="EAAB... (Encrypted with AES-256-GCM)">
+            <small class="form-hint">Write-only. Stored encrypted. Never returned in any API response.</small>
+          </div>
+
+          <div class="form-group">
+            <label>Internal Platform Notes</label>
+            <textarea name="internal_notes" class="form-control" rows="2" placeholder="SLA notes, agreement details..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close="modal-create-restaurant">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save & Onboard</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Restaurant Details & History -->
+  <div id="modal-view-restaurant" class="modal-backdrop" style="display: none;">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-header">
+        <h3 id="view-res-title" class="modal-title">Restaurant Profile</h3>
+        <button class="modal-close-btn" data-close="modal-view-restaurant">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="profile-summary-grid">
+          <div><strong>Owner:</strong> <span id="view-res-owner">-</span></div>
+          <div><strong>Owner Phone:</strong> <span id="view-res-phone">-</span></div>
+          <div><strong>Email:</strong> <span id="view-res-email">-</span></div>
+          <div><strong>Contact:</strong> <span id="view-res-contact">-</span></div>
+          <div><strong>Phone Number ID:</strong> <span id="view-res-phoneid" class="badge badge-secondary">-</span></div>
+          <div><strong>WABA ID:</strong> <span id="view-res-wabaid" class="badge badge-secondary">-</span></div>
+          <div><strong>Tenant Status:</strong> <span id="view-res-status">-</span></div>
+          <div><strong>Webhook Ingestion:</strong> <span id="view-res-active">-</span></div>
+        </div>
+
+        <div class="mt-3">
+          <strong>Address:</strong> <span id="view-res-address" class="text-muted">-</span>
+        </div>
+        <div class="mt-2">
+          <strong>Internal Notes:</strong> <span id="view-res-notes" class="text-muted">-</span>
+        </div>
+
+        <!-- Financial Summary Banner -->
+        <div class="financial-banner mt-4">
+          <div>
+            <div class="text-muted small">Total Recorded Payments</div>
+            <div id="view-res-total-paid" class="h3 font-bold text-emerald">₹0</div>
+          </div>
+          <div>
+            <div class="text-muted small">Outstanding Balance</div>
+            <div id="view-res-balance" class="h3 font-bold text-amber">₹0</div>
+          </div>
+          <div>
+            <div class="text-muted small">Current Subscription</div>
+            <div id="view-res-current-sub" class="font-medium">-</div>
+          </div>
+        </div>
+
+        <!-- Subscriptions History Tab -->
+        <div class="mt-4">
+          <h4 class="section-title">Subscription History</h4>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Plan Name</th>
+                  <th>Amount</th>
+                  <th>Start Date</th>
+                  <th>End Date</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="view-res-subs-body">
+                <tr><td colspan="5" class="text-center text-muted">No subscriptions found</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Payments History Tab -->
+        <div class="mt-4">
+          <h4 class="section-title">Payment History</h4>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Amount</th>
+                  <th>Mode</th>
+                  <th>Reference</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="view-res-payments-body">
+                <tr><td colspan="5" class="text-center text-muted">No payments recorded</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" data-close="modal-view-restaurant">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Edit Restaurant -->
+  <div id="modal-edit-restaurant" class="modal-backdrop" style="display: none;">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title">Edit Restaurant Profile</h3>
+        <button class="modal-close-btn" data-close="modal-edit-restaurant">&times;</button>
+      </div>
+      <form id="form-edit-restaurant">
+        <input type="hidden" name="id" id="edit-res-id">
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label>Restaurant Name *</label>
+              <input type="text" name="name" id="edit-res-name" class="form-control" required>
+            </div>
+            <div class="form-group col-6">
+              <label>Owner Name</label>
+              <input type="text" name="owner_name" id="edit-res-owner" class="form-control">
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label>Owner Phone *</label>
+              <input type="text" name="owner_phone" id="edit-res-phone" class="form-control" required>
+            </div>
+            <div class="form-group col-6">
+              <label>Email Address</label>
+              <input type="email" name="email" id="edit-res-email" class="form-control">
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label>Contact Number</label>
+              <input type="text" name="contact_number" id="edit-res-contact" class="form-control">
+            </div>
+            <div class="form-group col-6">
+              <label>Address</label>
+              <input type="text" name="address" id="edit-res-address" class="form-control">
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label>Phone Number ID</label>
+              <input type="text" name="phone_number_id" id="edit-res-phoneid" class="form-control" required>
+            </div>
+            <div class="form-group col-6">
+              <label>WABA ID</label>
+              <input type="text" name="waba_id" id="edit-res-wabaid" class="form-control" required>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Update Access Token (Optional)</label>
+            <input type="password" name="access_token" class="form-control" placeholder="Leave blank to keep existing encrypted token">
+          </div>
+
+          <div class="form-group">
+            <label>Internal Notes</label>
+            <textarea name="internal_notes" id="edit-res-notes" class="form-control" rows="2"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close="modal-edit-restaurant">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Change Restaurant Status -->
+  <div id="modal-status-restaurant" class="modal-backdrop" style="display: none;">
+    <div class="modal-dialog modal-sm">
+      <div class="modal-header">
+        <h3 class="modal-title">Change Restaurant Status</h3>
+        <button class="modal-close-btn" data-close="modal-status-restaurant">&times;</button>
+      </div>
+      <form id="form-status-restaurant">
+        <input type="hidden" id="status-res-id">
+        <div class="modal-body">
+          <p>Update tenant operational status for <strong id="status-res-name">-</strong>:</p>
+          <div class="form-group mt-3">
+            <label>New Status</label>
+            <select id="status-res-select" class="form-control">
+              <option value="ACTIVE">ACTIVE (Accept Webhooks)</option>
+              <option value="SUSPENDED">SUSPENDED (Block Webhooks)</option>
+              <option value="ONBOARDING">ONBOARDING (Setup / Testing)</option>
+              <option value="OFFBOARDED">OFFBOARDED (Decommissioned)</option>
+            </select>
+          </div>
+          <div class="alert alert-warning mt-3 small">
+            Setting status to SUSPENDED, ONBOARDING, or OFFBOARDED sets <code>is_active = false</code> and immediately drops incoming WhatsApp customer messages for this restaurant.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close="modal-status-restaurant">Cancel</button>
+          <button type="submit" class="btn btn-primary">Update Status</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: New Subscription -->
+  <div id="modal-create-subscription" class="modal-backdrop" style="display: none;">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title">Create / Renew Subscription</h3>
+        <button class="modal-close-btn" data-close="modal-create-subscription">&times;</button>
+      </div>
+      <form id="form-create-subscription">
+        <div class="modal-body">
+          <div class="form-group">
+            <label>Select Restaurant Tenant *</label>
+            <select name="restaurant_id" id="sub-res-dropdown" class="form-control" required>
+              <option value="">Select a restaurant...</option>
+            </select>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col-8">
+              <label>Plan Name *</label>
+              <input type="text" name="plan_name" class="form-control" required placeholder="e.g. Annual WhatsApp Automation (Year 1)">
+            </div>
+            <div class="form-group col-4">
+              <label>Initial Status</label>
+              <select name="status" class="form-control">
+                <option value="ACTIVE" selected>ACTIVE</option>
+                <option value="PENDING">PENDING</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label>Amount (₹ INR) *</label>
+              <input type="number" name="amount" step="0.01" min="0" class="form-control" required placeholder="15000.00">
+            </div>
+            <div class="form-group col-6">
+              <label>Currency</label>
+              <input type="text" name="currency" class="form-control" value="INR" readonly>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label>Start Date *</label>
+              <input type="date" name="start_date" id="sub-start-date" class="form-control" required>
+            </div>
+            <div class="form-group col-6">
+              <label>End Date *</label>
+              <input type="date" name="end_date" id="sub-end-date" class="form-control" required>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Notes</label>
+            <textarea name="notes" class="form-control" rows="2" placeholder="Renewal notes, special terms..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close="modal-create-subscription">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create Subscription</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Record Payment -->
+  <div id="modal-record-payment" class="modal-backdrop" style="display: none;">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title">Record Client Payment</h3>
+        <button class="modal-close-btn" data-close="modal-record-payment">&times;</button>
+      </div>
+      <form id="form-record-payment">
+        <div class="modal-body">
+          <div class="alert alert-info small mb-3">
+            <strong>Offline Record:</strong> RESTOPRO does not verify payments via banking APIs. Enter payments verified offline through bank statements or UPI receipts.
+          </div>
+
+          <div class="form-group">
+            <label>Restaurant Tenant *</label>
+            <select name="restaurant_id" id="payment-res-dropdown" class="form-control" required>
+              <option value="">Select a restaurant...</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Link to Subscription (Optional)</label>
+            <select name="subscription_id" id="payment-sub-dropdown" class="form-control">
+              <option value="">Select subscription (or leave blank for standalone payment)...</option>
+            </select>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label>Amount Paid (₹ INR) *</label>
+              <input type="number" name="amount" step="0.01" min="0.01" class="form-control" required placeholder="5000.00">
+            </div>
+            <div class="form-group col-6">
+              <label>Payment Mode *</label>
+              <select name="payment_mode" class="form-control" required>
+                <option value="BANK_TRANSFER" selected>Bank Transfer (NEFT/IMPS/RTGS)</option>
+                <option value="UPI">UPI</option>
+                <option value="CASH">Cash</option>
+                <option value="OTHER">Other</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label>Payment Date *</label>
+              <input type="date" name="payment_date" id="payment-date-input" class="form-control" required>
+            </div>
+            <div class="form-group col-6">
+              <label>Transaction / UTR Reference</label>
+              <input type="text" name="transaction_reference" class="form-control" placeholder="e.g. UTR102948204">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Notes</label>
+            <textarea name="notes" class="form-control" rows="2" placeholder="First installment / Renewal payment..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close="modal-record-payment">Cancel</button>
+          <button type="submit" class="btn btn-primary">Record Payment</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Reverse Payment -->
+  <div id="modal-reverse-payment" class="modal-backdrop" style="display: none;">
+    <div class="modal-dialog modal-sm">
+      <div class="modal-header">
+        <h3 class="modal-title">Reverse Payment</h3>
+        <button class="modal-close-btn" data-close="modal-reverse-payment">&times;</button>
+      </div>
+      <form id="form-reverse-payment">
+        <input type="hidden" id="reverse-payment-id">
+        <div class="modal-body">
+          <p>Are you sure you want to reverse payment <strong id="reverse-payment-ref">-</strong> of <strong id="reverse-payment-amt">-</strong>?</p>
+          <p class="text-muted small">This action is irreversible. It creates a formal reversal audit entry and deducts the amount from the client's paid balance.</p>
+          <div class="form-group mt-3">
+            <label>Reversal Reason *</label>
+            <input type="text" id="reverse-payment-reason" class="form-control" required placeholder="e.g. Bounced cheque, erroneous duplicate entry">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close="modal-reverse-payment">Cancel</button>
+          <button type="submit" class="btn btn-danger">Confirm Reversal</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: View Audit Metadata -->
+  <div id="modal-view-audit" class="modal-backdrop" style="display: none;">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 id="audit-meta-title" class="modal-title">Audit Log Details</h3>
+        <button class="modal-close-btn" data-close="modal-view-audit">&times;</button>
+      </div>
+      <div class="modal-body">
+        <pre id="audit-meta-pre" class="code-block"></pre>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" data-close="modal-view-audit">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/admin/app.js"></script>
+</body>
+</html>

@@ -2,9 +2,16 @@
  * RESTOPRO — Express Application Setup
  */
 const express = require('express');
+const path = require('path');
 const { verifyWebhookSignature } = require('./middleware/verifyWebhook');
 const { handleGetVerification, handleIncomingEvent } = require('./controllers/webhook.controller');
 const adminAuthRoutes = require('./routes/admin-auth.routes');
+const adminRestaurantRoutes = require('./routes/admin-restaurant.routes');
+const adminSubscriptionRoutes = require('./routes/admin-subscription.routes');
+const adminPaymentRoutes = require('./routes/admin-payment.routes');
+const adminDashboardRoutes = require('./routes/admin-dashboard.routes');
+const adminSystemRoutes = require('./routes/admin-system.routes');
+const adminAuditLogRoutes = require('./routes/admin-audit-logs.routes');
 const prisma = require('./config/database');
 const logger = require('./utils/logger');
 
@@ -80,8 +87,23 @@ app.get('/', (req, res) => {
 app.get('/api/webhook', handleGetVerification);
 app.post('/api/webhook', verifyWebhookSignature, handleIncomingEvent);
 
-// Super Admin Authentication endpoints
+// Super Admin API endpoints
 app.use('/api/admin/auth', adminAuthRoutes);
+app.use('/api/admin/restaurants', adminRestaurantRoutes);
+app.use('/api/admin/subscriptions', adminSubscriptionRoutes);
+app.use('/api/admin/payments', adminPaymentRoutes);
+app.use('/api/admin/dashboard', adminDashboardRoutes);
+app.use('/api/admin/system', adminSystemRoutes);
+app.use('/api/admin/audit-logs', adminAuditLogRoutes);
+
+// Super Admin Frontend Panel
+app.get('/admin', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/admin/index.html'));
+});
+app.use('/admin', express.static(path.join(__dirname, '../public/admin')));
+app.get('/admin/*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/admin/index.html'));
+});
 
 // 404 Handler
 app.use((req, res) => {

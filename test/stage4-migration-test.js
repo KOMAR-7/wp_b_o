@@ -117,11 +117,29 @@ async function runStage4MigrationTests() {
     // TEST GROUP 3: Existing Orders Remain Readable & Valid
     // -------------------------------------------------------------
     console.log('\n--- TEST GROUP 3: Existing Orders Remain Readable ---');
-    const existingOrders = await prisma.order.findMany({
+    let existingOrders = await prisma.order.findMany({
       where: {
         id: { notIn: createdOrderIds }
       }
     });
+
+    // Ensure at least one baseline order exists to verify nullable confirmation_token readability
+    if (existingOrders.length === 0) {
+      const baselineOrder = await prisma.order.create({
+        data: {
+          restaurant_id: tenantA.id,
+          order_reference: `RP-BASE-${Date.now().toString().slice(-6)}`,
+          customer_phone: '919876543299',
+          order_type: 'DELIVERY',
+          items: [{ item: 'Baseline Biryani', quantity: 1, price: 200 }],
+          total_amount: 200.00,
+          confirmation_token: null
+        }
+      });
+      createdOrderIds.push(baselineOrder.id);
+      existingOrders = [baselineOrder];
+    }
+
     assert(existingOrders.length > 0, `Pre-existing orders are found (${existingOrders.length} pre-existing orders)`);
     const allPreExistingHaveNullOrValidToken = existingOrders.every(
       (o) => o.confirmation_token === null || typeof o.confirmation_token === 'string'

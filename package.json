@@ -24,6 +24,7 @@
     "test:readiness": "node test/readiness-endpoint-test.js",
     "test:shutdown": "node test/graceful-shutdown-test.js",
     "test:stage9": "node test/stage9-admin-auth-test.js",
+    "test:stage9:full": "node test/stage9-full-suite-test.js",
     "admin:create": "node scripts/create-super-admin.js",
     "db:seed": "node prisma/seed.js"
   },
