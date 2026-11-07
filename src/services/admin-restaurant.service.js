@@ -7,6 +7,68 @@ const logger = require('../utils/logger');
 const { encryptToken } = require('../utils/crypto');
 
 /**
+ * Validates phone number in strict E.164 international format (e.g. +919876543210).
+ * @param {string} phone
+ * @returns {boolean}
+ */
+function validateE164Phone(phone) {
+  if (!phone || typeof phone !== 'string') return false;
+  return /^\+[1-9]\d{6,14}$/.test(phone.trim());
+}
+
+/**
+ * Parses internal notes and extracts structured metadata if present.
+ * @param {string} internalNotes
+ * @returns {{textNotes: string, ownerConsent: Object|null}}
+ */
+function parseInternalNotes(internalNotes) {
+  if (!internalNotes || typeof internalNotes !== 'string') {
+    return { textNotes: '', ownerConsent: null };
+  }
+  const tagMatch = internalNotes.match(/<!--RESTOPRO_METADATA:(.*?)-->/s);
+  if (tagMatch) {
+    try {
+      const meta = JSON.parse(tagMatch[1]);
+      const textNotes = internalNotes.replace(/<!--RESTOPRO_METADATA:.*?-->/s, '').trim();
+      return { textNotes, ownerConsent: meta.ownerConsent || null };
+    } catch (_) {}
+  }
+  return { textNotes: internalNotes, ownerConsent: null };
+}
+
+/**
+ * Formats internal notes with embedded structured metadata.
+ * @param {string} textNotes
+ * @param {Object} ownerConsent
+ * @returns {string}
+ */
+function formatInternalNotes(textNotes, ownerConsent) {
+  const cleanText = (textNotes || '').replace(/<!--RESTOPRO_METADATA:.*?-->/s, '').trim();
+  if (!ownerConsent) return cleanText;
+  const metaTag = `<!--RESTOPRO_METADATA:${JSON.stringify({ ownerConsent })}-->`;
+  return cleanText ? `${cleanText}\n\n${metaTag}` : metaTag;
+}
+
+/**
+ * Returns owner notification consent status for a restaurant.
+ * @param {Object} restaurant
+ * @returns {{optedIn: boolean, consentedAt: string, source: string, revoked: boolean, revokedAt?: string, revokedReason?: string}}
+ */
+function getOwnerConsent(restaurant) {
+  if (!restaurant) return { optedIn: false, consentedAt: null, source: 'UNKNOWN', revoked: false };
+  const parsed = parseInternalNotes(restaurant.internal_notes);
+  if (parsed.ownerConsent) {
+    return parsed.ownerConsent;
+  }
+  return {
+    optedIn: Boolean(restaurant.owner_phone),
+    consentedAt: restaurant.created_at ? new Date(restaurant.created_at).toISOString() : new Date().toISOString(),
+    source: 'SUPER_ADMIN_ONBOARDING',
+    revoked: false
+  };
+}
+
+/**
  * Sanitizes restaurant object to ensure sensitive credentials are never leaked.
  * @param {Object} restaurant
  * @returns {Object} Public administrative restaurant view
@@ -75,11 +137,47 @@ async function listRestaurants({
     })
   ]);
 
+  const restaurantIds = items.map(r => r.id);
+  const [failedOutboxGroup, recentAuthErrors] = await Promise.all([
+    prisma.outboxMessage.groupBy({
+      by: ['restaurant_id'],
+      where: {
+        restaurant_id: { in: restaurantIds },
+        status: 'FAILED'
+      },
+      _count: { id: true }
+    }),
+    prisma.outboxMessage.findMany({
+      where: {
+        restaurant_id: { in: restaurantIds },
+        status: 'FAILED',
+        last_error: { contains: 'Authentication' }
+      },
+      select: { restaurant_id: true }
+    })
+  ]);
+
+  const failedCountMap = new Map(failedOutboxGroup.map(g => [g.restaurant_id, g._count.id]));
+  const authErrorSet = new Set(recentAuthErrors.map(e => e.restaurant_id));
+
   const sanitized = items.map((r) => {
     const activeSub = r.subscriptions && r.subscriptions[0] ? r.subscriptions[0] : null;
     const base = sanitizeRestaurant(r);
+    const failedCount = failedCountMap.get(r.id) || 0;
+    const hasAuthError = authErrorSet.has(r.id);
+
+    let whatsappStatus = 'HEALTHY';
+    if (hasAuthError) {
+      whatsappStatus = 'REQUIRES_REAUTH';
+    } else if (!r.access_token_encrypted) {
+      whatsappStatus = 'NOT_CONFIGURED';
+    }
+
     return {
       ...base,
+      whatsapp_status: whatsappStatus,
+      failed_outbox_count: failedCount,
+      owner_consent: getOwnerConsent(r),
       current_subscription: activeSub ? {
         id: activeSub.id,
         plan_name: activeSub.plan_name,
@@ -133,6 +231,13 @@ async function createRestaurant(data, adminId) {
     throw err;
   }
 
+  const cleanOwnerPhone = owner_phone.trim();
+  if (!validateE164Phone(cleanOwnerPhone)) {
+    const err = new Error('Invalid owner_phone format: must be in E.164 international format (e.g. +919876543210)');
+    err.statusCode = 400;
+    throw err;
+  }
+
   if (!phone_number_id || typeof phone_number_id !== 'string') {
     const err = new Error('Meta phone_number_id is required');
     err.statusCode = 400;
@@ -170,10 +275,16 @@ async function createRestaurant(data, adminId) {
     throw err;
   }
 
-  // Encrypt access token safely
+  // Clean, validate and encrypt access token safely
   let encryptedToken;
   if (access_token && typeof access_token === 'string' && access_token.trim().length > 0) {
-    encryptedToken = encryptToken(access_token.trim());
+    const cleanToken = access_token.trim().replace(/^["']|["']$/g, '').trim();
+    if (!cleanToken.startsWith('EAA') && !cleanToken.startsWith('mock_')) {
+      const err = new Error('Invalid Meta WhatsApp access token: must begin with "EAA"');
+      err.statusCode = 400;
+      throw err;
+    }
+    encryptedToken = encryptToken(cleanToken);
   } else {
     encryptedToken = encryptToken('mock_access_token');
   }
@@ -184,16 +295,24 @@ async function createRestaurant(data, adminId) {
 
   const isActive = normalizedStatus === 'ACTIVE';
 
+  const ownerConsentData = data.owner_consent || {
+    optedIn: true,
+    consentedAt: new Date().toISOString(),
+    source: 'SUPER_ADMIN_ONBOARDING',
+    revoked: false
+  };
+  const finalInternalNotes = formatInternalNotes(internal_notes, ownerConsentData);
+
   const created = await prisma.$transaction(async (tx) => {
     const restaurant = await tx.restaurant.create({
       data: {
         name: name.trim(),
         owner_name: owner_name ? owner_name.trim() : null,
-        owner_phone: owner_phone.trim(),
+        owner_phone: cleanOwnerPhone,
         email: email && typeof email === 'string' ? email.trim().toLowerCase() : null,
         contact_number: contact_number ? contact_number.trim() : null,
         address: address ? address.trim() : null,
-        internal_notes: internal_notes ? internal_notes.trim() : null,
+        internal_notes: finalInternalNotes,
         phone_number_id: cleanPhoneId,
         waba_id: cleanWabaId,
         access_token_encrypted: encryptedToken,
@@ -285,10 +404,37 @@ async function getRestaurantById(id) {
     outstandingBalance = Math.max(0, subAmount - paymentsForSub);
   }
 
+  // Query diagnostic status & recent outbox failures
+  const [failedOutboxCount, recentAuthError] = await Promise.all([
+    prisma.outboxMessage.count({
+      where: { restaurant_id: id, status: 'FAILED' }
+    }),
+    prisma.outboxMessage.findFirst({
+      where: {
+        restaurant_id: id,
+        status: 'FAILED',
+        last_error: { contains: 'Authentication' }
+      },
+      orderBy: { created_at: 'desc' }
+    })
+  ]);
+
+  let whatsappStatus = 'HEALTHY';
+  if (recentAuthError) {
+    whatsappStatus = 'REQUIRES_REAUTH';
+  } else if (!restaurant.access_token_encrypted) {
+    whatsappStatus = 'NOT_CONFIGURED';
+  }
+
+  const ownerConsent = getOwnerConsent(restaurant);
   const base = sanitizeRestaurant(restaurant);
 
   return {
     ...base,
+    whatsapp_status: whatsappStatus,
+    failed_outbox_count: failedOutboxCount,
+    last_auth_error: recentAuthError ? recentAuthError.last_error : null,
+    owner_consent: ownerConsent,
     total_recorded_payments: totalPaymentsRecorded,
     outstanding_balance: outstandingBalance,
     current_subscription: activeSub ? {
@@ -327,11 +473,20 @@ async function updateRestaurant(id, updates, adminId) {
 
   if (updates.name !== undefined) updateData.name = updates.name.trim();
   if (updates.owner_name !== undefined) updateData.owner_name = updates.owner_name ? updates.owner_name.trim() : null;
-  if (updates.owner_phone !== undefined) updateData.owner_phone = updates.owner_phone.trim();
+
+  if (updates.owner_phone !== undefined) {
+    const cleanOwnerPhone = updates.owner_phone.trim();
+    if (!validateE164Phone(cleanOwnerPhone)) {
+      const err = new Error('Invalid owner_phone format: must be in E.164 international format (e.g. +919876543210)');
+      err.statusCode = 400;
+      throw err;
+    }
+    updateData.owner_phone = cleanOwnerPhone;
+  }
+
   if (updates.email !== undefined) updateData.email = updates.email ? updates.email.trim().toLowerCase() : null;
   if (updates.contact_number !== undefined) updateData.contact_number = updates.contact_number ? updates.contact_number.trim() : null;
   if (updates.address !== undefined) updateData.address = updates.address ? updates.address.trim() : null;
-  if (updates.internal_notes !== undefined) updateData.internal_notes = updates.internal_notes ? updates.internal_notes.trim() : null;
 
   if (updates.phone_number_id !== undefined && updates.phone_number_id.trim() !== existing.phone_number_id) {
     const newPhoneId = updates.phone_number_id.trim();
@@ -359,8 +514,33 @@ async function updateRestaurant(id, updates, adminId) {
     updateData.waba_id = newWabaId;
   }
 
-  if (updates.access_token && typeof updates.access_token === 'string' && updates.access_token.trim().length > 0) {
-    updateData.access_token_encrypted = encryptToken(updates.access_token.trim());
+  // Token update: Ignore empty/blank inputs to prevent browser password autofill corruption!
+  if (updates.access_token !== undefined) {
+    const rawToken = typeof updates.access_token === 'string'
+      ? updates.access_token.trim().replace(/^["']|["']$/g, '').trim()
+      : '';
+    if (rawToken.length > 0) {
+      if (!rawToken.startsWith('EAA') && !rawToken.startsWith('mock_')) {
+        const err = new Error('Invalid Meta WhatsApp access token: must begin with "EAA"');
+        err.statusCode = 400;
+        throw err;
+      }
+      updateData.access_token_encrypted = encryptToken(rawToken);
+    }
+  }
+
+  // Owner consent updates or notes updates
+  if (updates.owner_consent !== undefined || updates.internal_notes !== undefined) {
+    const existingConsent = getOwnerConsent(existing);
+    const updatedConsent = updates.owner_consent ? {
+      ...existingConsent,
+      ...updates.owner_consent,
+      updatedAt: new Date().toISOString()
+    } : existingConsent;
+    const baseNotes = updates.internal_notes !== undefined
+      ? updates.internal_notes
+      : parseInternalNotes(existing.internal_notes).textNotes;
+    updateData.internal_notes = formatInternalNotes(baseNotes, updatedConsent);
   }
 
   const updated = await prisma.$transaction(async (tx) => {
@@ -454,12 +634,94 @@ async function updateRestaurantStatus(id, newStatus, adminId) {
   return sanitizeRestaurant(updated);
 }
 
+/**
+ * Retries eligible failed outbox messages for a restaurant after credentials have been verified/corrected.
+ * Resets status to PENDING and attempts to 0, clearing error state safely.
+ *
+ * @param {string} restaurantId
+ * @param {string} [adminId]
+ * @returns {Promise<{success: boolean, retriedCount: number, message: string}>}
+ */
+async function retryFailedOutboxMessages(restaurantId, adminId) {
+  if (!restaurantId || typeof restaurantId !== 'string') {
+    const err = new Error('Valid restaurant ID is required');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const restaurant = await prisma.restaurant.findUnique({
+    where: { id: restaurantId }
+  });
+  if (!restaurant) {
+    const err = new Error(`Restaurant with ID "${restaurantId}" not found`);
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const failedMessages = await prisma.outboxMessage.findMany({
+    where: {
+      restaurant_id: restaurantId,
+      status: 'FAILED'
+    }
+  });
+
+  if (failedMessages.length === 0) {
+    return {
+      success: true,
+      retriedCount: 0,
+      message: 'No failed outbox messages found for this restaurant'
+    };
+  }
+
+  const updated = await prisma.outboxMessage.updateMany({
+    where: {
+      restaurant_id: restaurantId,
+      status: 'FAILED'
+    },
+    data: {
+      status: 'PENDING',
+      attempts: 0,
+      last_error: null
+    }
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      admin_user_id: adminId || null,
+      action: 'FAILED_OUTBOX_RETRIED',
+      entity_type: 'Restaurant',
+      entity_id: restaurantId,
+      metadata: {
+        restaurantName: restaurant.name,
+        retriedCount: updated.count
+      }
+    }
+  });
+
+  logger.info('Admin triggered retry of failed outbox messages', {
+    restaurantId,
+    adminId,
+    retriedCount: updated.count
+  });
+
+  return {
+    success: true,
+    retriedCount: updated.count,
+    message: `Successfully queued ${updated.count} failed message(s) for retry.`
+  };
+}
+
 module.exports = {
   listRestaurants,
   createRestaurant,
   getRestaurantById,
   updateRestaurant,
   updateRestaurantStatus,
-  sanitizeRestaurant
+  retryFailedOutboxMessages,
+  sanitizeRestaurant,
+  validateE164Phone,
+  getOwnerConsent,
+  parseInternalNotes,
+  formatInternalNotes
 };
 

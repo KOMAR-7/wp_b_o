@@ -328,11 +328,25 @@
             OFFBOARDED: 'badge-secondary'
           }[r.tenant_status] || 'badge-secondary';
 
+          let waBadge = '';
+          if (r.whatsapp_status === 'REQUIRES_REAUTH') {
+            waBadge = `<div style="margin-top: 4px;"><span class="badge badge-danger">⚠️ 401 Re-Auth Required</span></div>`;
+          } else if (r.whatsapp_status === 'NOT_CONFIGURED') {
+            waBadge = `<div style="margin-top: 4px;"><span class="badge badge-secondary">WA Not Configured</span></div>`;
+          } else {
+            waBadge = `<div style="margin-top: 4px;"><span class="badge badge-success">WA Connected</span></div>`;
+          }
+
+          const retryBtn = (r.failed_outbox_count > 0)
+            ? `<button class="btn btn-warning btn-sm res-retry-btn" data-id="${r.id}" data-name="${escapeHtml(r.name)}" title="Retry ${r.failed_outbox_count} failed outbox messages">Retry (${r.failed_outbox_count})</button>`
+            : '';
+
           return `
             <tr>
               <td>
                 <div class="font-bold">${escapeHtml(r.name)}</div>
                 <div class="small text-muted">${escapeHtml(r.owner_name || 'Owner')} • ${escapeHtml(r.owner_phone)}</div>
+                ${waBadge}
               </td>
               <td>${escapeHtml(r.owner_name || '-')}</td>
               <td><code>${escapeHtml(r.phone_number_id)}</code></td>
@@ -343,10 +357,11 @@
               </td>
               <td>${subInfo}</td>
               <td>
-                <div style="display: flex; gap: 4px;">
+                <div style="display: flex; gap: 4px; flex-wrap: wrap;">
                   <button class="btn btn-outline btn-sm res-view-btn" data-id="${r.id}">View</button>
                   <button class="btn btn-outline btn-sm res-edit-btn" data-id="${r.id}">Edit</button>
                   <button class="btn btn-outline btn-sm res-status-btn" data-id="${r.id}" data-name="${escapeHtml(r.name)}" data-status="${r.tenant_status}">Status</button>
+                  ${retryBtn}
                 </div>
               </td>
             </tr>
@@ -381,6 +396,47 @@
       document.getElementById('view-res-active').textContent = r.is_active ? 'ENABLED (Receives Webhooks)' : 'DISABLED (Incoming Webhooks Dropped)';
       document.getElementById('view-res-address').textContent = r.address || 'None entered';
       document.getElementById('view-res-notes').textContent = r.internal_notes || 'None';
+
+      const waStatusEl = document.getElementById('view-res-whatsapp-status');
+      if (waStatusEl) {
+        if (r.whatsapp_status === 'REQUIRES_REAUTH') {
+          waStatusEl.innerHTML = '<span class="badge badge-danger">⚠️ 401 Re-Auth Required</span>';
+        } else if (r.whatsapp_status === 'NOT_CONFIGURED') {
+          waStatusEl.innerHTML = '<span class="badge badge-secondary">Not Configured</span>';
+        } else {
+          waStatusEl.innerHTML = '<span class="badge badge-success">Healthy</span>';
+        }
+      }
+
+      const consentEl = document.getElementById('view-res-consent');
+      if (consentEl) {
+        if (r.owner_consent && r.owner_consent.hasConsent) {
+          consentEl.innerHTML = `<span class="badge badge-success">Opted In (${escapeHtml(r.owner_consent.source || 'onboarding')})</span>`;
+        } else {
+          consentEl.innerHTML = '<span class="badge badge-secondary">Not Opted In</span>';
+        }
+      }
+
+      const outboxAlert = document.getElementById('view-res-outbox-alert');
+      const retryModalBtn = document.getElementById('view-res-retry-outbox-btn');
+      if (outboxAlert && retryModalBtn) {
+        if (r.failed_outbox_count > 0) {
+          outboxAlert.style.display = 'block';
+          document.getElementById('view-res-outbox-msg').textContent = `${r.failed_outbox_count} failed outbox message(s) detected.`;
+          retryModalBtn.onclick = async () => {
+            try {
+              const res = await apiCall(`/api/admin/restaurants/${r.id}/retry-outbox`, { method: 'POST' });
+              showToast(res.message || 'Failed messages reset for retry', 'success');
+              outboxAlert.style.display = 'none';
+              loadRestaurants();
+            } catch (err) {
+              showToast(`Retry failed: ${err.message}`, 'error');
+            }
+          };
+        } else {
+          outboxAlert.style.display = 'none';
+        }
+      }
 
       document.getElementById('view-res-total-paid').textContent = formatCurrency(r.total_recorded_payments);
       document.getElementById('view-res-balance').textContent = formatCurrency(r.outstanding_balance);
@@ -439,6 +495,8 @@
       document.getElementById('edit-res-phoneid').value = r.phone_number_id;
       document.getElementById('edit-res-wabaid').value = r.waba_id;
       document.getElementById('edit-res-notes').value = r.internal_notes || '';
+      const tokenInput = document.getElementById('edit-res-token');
+      if (tokenInput) tokenInput.value = '';
 
       openModal('modal-edit-restaurant');
     } catch (err) {
@@ -873,8 +931,12 @@
       const formData = new FormData(e.target);
       const payload = Object.fromEntries(formData.entries());
 
-      // If access_token empty, remove so it's not sent
-      if (!payload.access_token) delete payload.access_token;
+      // If access_token empty or whitespace, remove so it is never sent or overwritten
+      if (!payload.access_token || !payload.access_token.trim()) {
+        delete payload.access_token;
+      } else {
+        payload.access_token = payload.access_token.trim();
+      }
 
       try {
         await apiCall(`/api/admin/restaurants/${id}`, {
@@ -984,6 +1046,24 @@
         document.getElementById('status-res-name').textContent = statusResBtn.dataset.name;
         document.getElementById('status-res-select').value = statusResBtn.dataset.status;
         openModal('modal-status-restaurant');
+        return;
+      }
+
+      // Retry Failed Outbox Messages
+      const retryResBtn = e.target.closest('.res-retry-btn');
+      if (retryResBtn) {
+        const id = retryResBtn.dataset.id;
+        const name = retryResBtn.dataset.name;
+        if (confirm(`Retry all failed outbox messages for "${name}"?`)) {
+          apiCall(`/api/admin/restaurants/${id}/retry-outbox`, { method: 'POST' })
+            .then((res) => {
+              showToast(res.message || 'Failed messages reset for retry', 'success');
+              loadRestaurants();
+            })
+            .catch((err) => {
+              showToast(`Retry failed: ${err.message}`, 'error');
+            });
+        }
         return;
       }
 

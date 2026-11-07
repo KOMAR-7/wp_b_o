@@ -27,6 +27,7 @@
     "test:stage9:full": "node test/stage9-full-suite-test.js",
     "test:stage10": "node test/stage10-conversational-dispatch-test.js",
     "test:stage10:flow": "node test/stage10-refactored-ordering-flow-test.js",
+    "test:stage11": "node test/stage11-owner-whatsapp-auth-test.js",
     "admin:create": "node scripts/create-super-admin.js",
     "db:seed": "node prisma/seed.js"
   },

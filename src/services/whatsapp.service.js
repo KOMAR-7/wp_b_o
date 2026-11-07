@@ -18,15 +18,24 @@ const META_GRAPH_VERSION = 'v21.0';
 const DEFAULT_TIMEOUT_MS = 10000;
 
 /**
- * Builds the Meta interactive button payload for owner order notifications.
+ * Builds the Meta interactive button or template payload for owner order notifications.
+ * Supports both interactive buttons (within 24h customer window) and approved templates (outside window).
  *
  * @param {Object} params
  * @param {string} params.ownerPhone - Owner WhatsApp phone number
  * @param {Object} params.order - Created order record
  * @param {string} [params.restaurantName] - Commercial restaurant name
+ * @param {boolean} [params.useTemplate=false] - Whether to format as approved Meta message template
+ * @param {string} [params.templateName='order_notification_alert'] - Meta approved template name
  * @returns {Object} WhatsApp Cloud API payload
  */
-function buildOwnerNotificationPayload({ ownerPhone, order, restaurantName = '' }) {
+function buildOwnerNotificationPayload({
+  ownerPhone,
+  order,
+  restaurantName = '',
+  useTemplate = false,
+  templateName = 'order_notification_alert'
+}) {
   if (!ownerPhone || typeof ownerPhone !== 'string') {
     throw new Error('[WHATSAPP PAYLOAD ERROR] Missing ownerPhone.');
   }
@@ -40,6 +49,50 @@ function buildOwnerNotificationPayload({ ownerPhone, order, restaurantName = '' 
 
   const items = Array.isArray(order.items) ? order.items : [];
   const currencySymbol = order.currency === 'INR' ? '₹' : `${order.currency} `;
+
+  const total = typeof order.total_amount === 'object' && order.total_amount !== null
+    ? Number(order.total_amount).toFixed(2)
+    : Number(order.total_amount || 0).toFixed(2);
+
+  // If outside 24h window or explicitly requested: use approved template format
+  if (useTemplate) {
+    return {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: cleanPhone,
+      type: 'template',
+      template: {
+        name: templateName,
+        language: { code: 'en' },
+        components: [
+          {
+            type: 'header',
+            parameters: [{ type: 'text', text: `#${order.order_reference}` }]
+          },
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: order.customer_name || 'Customer' },
+              { type: 'text', text: order.order_type === 'DELIVERY' ? 'Delivery' : 'Takeaway' },
+              { type: 'text', text: `${currencySymbol}${total}` }
+            ]
+          },
+          {
+            type: 'button',
+            sub_type: 'quick_reply',
+            index: '0',
+            parameters: [{ type: 'payload', payload: `OWNER_ACCEPT:${order.id}` }]
+          },
+          {
+            type: 'button',
+            sub_type: 'quick_reply',
+            index: '1',
+            parameters: [{ type: 'payload', payload: `OWNER_REJECT:${order.id}` }]
+          }
+        ]
+      }
+    };
+  }
 
   let bodyText = `🔔 *NEW ORDER: #${order.order_reference}*\n`;
   bodyText += '━━━━━━━━━━━━━━━━━━━━\n';
@@ -56,10 +109,6 @@ function buildOwnerNotificationPayload({ ownerPhone, order, restaurantName = '' 
     const unitPrice = typeof item.unitPrice === 'number' ? item.unitPrice.toFixed(2) : item.unitPrice;
     bodyText += `• ${item.quantity}x ${item.productName || item.productRetailerId} @ ${currencySymbol}${unitPrice}\n`;
   }
-
-  const total = typeof order.total_amount === 'object' && order.total_amount !== null
-    ? Number(order.total_amount).toFixed(2)
-    : Number(order.total_amount || 0).toFixed(2);
 
   bodyText += '━━━━━━━━━━━━━━━━━━━━\n';
   bodyText += `*Total Amount:* ${currencySymbol}${total}\n`;
@@ -222,8 +271,8 @@ async function resolveRestaurantCredentials(restaurantId, db = prisma) {
     throw new Error(`[TENANT ERROR] Restaurant "${restaurantId}" does not exist.`);
   }
 
-  if (!restaurant.is_active) {
-    throw new Error(`[TENANT ERROR] Restaurant "${restaurant.name}" is inactive.`);
+  if (!restaurant.is_active || restaurant.tenant_status === 'SUSPENDED') {
+    throw new Error(`[TENANT ERROR] Restaurant "${restaurant.name}" is inactive or suspended.`);
   }
 
   const phoneNumberId = restaurant.phone_number_id;
@@ -236,11 +285,31 @@ async function resolveRestaurantCredentials(restaurantId, db = prisma) {
     try {
       accessToken = decryptToken(accessToken);
     } catch (decryptErr) {
-      logger.error('Failed to decrypt restaurant access token', { restaurantId, error: decryptErr.message });
-      throw new Error(`[CREDENTIAL ERROR] Failed to decrypt WhatsApp access token for "${restaurant.name}".`);
+      logger.error('Failed to decrypt restaurant access token', {
+        restaurantId,
+        restaurantName: restaurant.name,
+        error: decryptErr.message
+      });
+      throw new Error(`[CREDENTIAL ERROR] Failed to decrypt WhatsApp access token for "${restaurant.name}". Key mismatch or corrupted data. Re-authentication required.`);
     }
   } else if (!accessToken || accessToken.startsWith('mock_')) {
-    accessToken = config.meta.accessToken || accessToken || 'mock_access_token';
+    accessToken = accessToken || config.meta.accessToken || 'mock_access_token';
+  }
+
+  // Normalize: trim whitespace and strip accidental surrounding quotes
+  accessToken = (accessToken || '').trim();
+  if ((accessToken.startsWith('"') && accessToken.endsWith('"')) ||
+      (accessToken.startsWith("'") && accessToken.endsWith("'"))) {
+    accessToken = accessToken.slice(1, -1).trim();
+  }
+
+  if (!accessToken || (!accessToken.startsWith('EAA') && !accessToken.startsWith('mock_'))) {
+    logger.warn('Restaurant access token format is invalid or missing required prefix', {
+      restaurantId,
+      restaurantName: restaurant.name,
+      tokenLength: accessToken.length
+    });
+    throw new Error(`[CREDENTIAL ERROR] Restaurant "${restaurant.name}" has an invalid WhatsApp access token. Access tokens must begin with "EAA". Re-authentication required.`);
   }
 
   return {
@@ -261,7 +330,7 @@ async function resolveRestaurantCredentials(restaurantId, db = prisma) {
  * @param {Object} params.payload
  * @param {number} [params.timeoutMs=10000]
  * @param {Object} [params.httpClient=axios] - Optional injectable client for tests
- * @returns {Promise<{success: boolean, metaMessageId?: string, isTimeout?: boolean, isRetryable?: boolean, statusCode?: number, error?: string, data?: Object}>}
+ * @returns {Promise<{success: boolean, metaMessageId?: string, isTimeout?: boolean, isRetryable?: boolean, statusCode?: number, metaErrorCode?: number, metaErrorSubcode?: number, metaErrorType?: string, error?: string, data?: Object}>}
  */
 async function sendWhatsAppMessage({
   phoneNumberId,
@@ -313,9 +382,17 @@ async function sendWhatsAppMessage({
       (typeof err.message === 'string' && err.message.toLowerCase().includes('timeout'));
 
     const statusCode = err.response?.status || null;
-    const isRetryable = isTimeout || (typeof statusCode === 'number' && statusCode >= 500);
+    const metaErrorObj = err.response?.data?.error || {};
+    const metaErrorCode = metaErrorObj.code || null;
+    const metaErrorSubcode = metaErrorObj.error_subcode || null;
+    const metaErrorType = metaErrorObj.type || null;
 
-    let rawErrorMessage = err.response?.data?.error?.message || err.message || 'Meta API error';
+    // 401 Authentication Error is always non-retryable
+    const isRetryable = statusCode === 401
+      ? false
+      : (isTimeout || (typeof statusCode === 'number' && statusCode >= 500));
+
+    let rawErrorMessage = metaErrorObj.message || err.message || 'Meta API error';
     // Redact access token from error string safely by escaping regex metacharacters
     let cleanError = rawErrorMessage;
     if (typeof accessToken === 'string' && accessToken.length > 0) {
@@ -323,20 +400,35 @@ async function sendWhatsAppMessage({
       cleanError = rawErrorMessage.replace(new RegExp(escapedToken, 'g'), '[REDACTED]');
     }
 
-    logger.error('WhatsApp API message dispatch failed', {
-      phoneNumberId,
-      recipient: payload?.to,
-      statusCode,
-      isTimeout,
-      isRetryable,
-      error: cleanError
-    });
+    if (statusCode === 401) {
+      logger.error('Meta WhatsApp Cloud API 401 Authentication Error: Access token is invalid, expired, revoked, or lacks required permissions', {
+        phoneNumberId,
+        recipient: payload?.to,
+        statusCode,
+        metaErrorCode,
+        metaErrorSubcode,
+        metaErrorType,
+        error: cleanError
+      });
+    } else {
+      logger.error('WhatsApp API message dispatch failed', {
+        phoneNumberId,
+        recipient: payload?.to,
+        statusCode,
+        isTimeout,
+        isRetryable,
+        error: cleanError
+      });
+    }
 
     return {
       success: false,
       isTimeout,
       isRetryable,
       statusCode,
+      metaErrorCode,
+      metaErrorSubcode,
+      metaErrorType,
       error: cleanError
     };
   }

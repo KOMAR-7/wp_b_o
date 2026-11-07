@@ -10,12 +10,26 @@ const TAG_LENGTH = 16; // 128 bits
 const PREFIX = 'enc:v1:';
 
 /**
- * Derives a consistent 256-bit encryption key from environment configuration.
- * @returns {Buffer} 32-byte encryption key
+ * Derives consistent 256-bit encryption keys from environment configuration.
+ * Supports primary key derivation and fallback candidates to handle key transitions smoothly.
+ * @returns {Array<Buffer>} 32-byte encryption keys
  */
+function getCandidateKeys() {
+  const secrets = [];
+  if (process.env.ENCRYPTION_KEY && process.env.ENCRYPTION_KEY.trim()) {
+    secrets.push(process.env.ENCRYPTION_KEY.trim());
+  }
+  if (process.env.META_APP_SECRET && process.env.META_APP_SECRET.trim()) {
+    secrets.push(process.env.META_APP_SECRET.trim());
+  }
+  secrets.push('restopro_default_secure_token_secret_key_2026');
+
+  const unique = Array.from(new Set(secrets));
+  return unique.map(s => crypto.createHash('sha256').update(s).digest());
+}
+
 function getEncryptionKey() {
-  const secret = process.env.ENCRYPTION_KEY || process.env.META_APP_SECRET || 'restopro_default_secure_token_secret_key_2026';
-  return crypto.createHash('sha256').update(secret).digest();
+  return getCandidateKeys()[0];
 }
 
 /**
@@ -28,12 +42,13 @@ function encryptToken(plaintext) {
     throw new Error('Plaintext credential must be a non-empty string');
   }
 
+  const cleanPlaintext = plaintext.trim();
   const key = getEncryptionKey();
   const iv = crypto.randomBytes(IV_LENGTH);
   const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
 
   const encrypted = Buffer.concat([
-    cipher.update(plaintext, 'utf8'),
+    cipher.update(cleanPlaintext, 'utf8'),
     cipher.final()
   ]);
 
@@ -45,6 +60,7 @@ function encryptToken(plaintext) {
 /**
  * Decrypts an AES-256-GCM encrypted token.
  * Passes through mock or unencrypted tokens safely.
+ * Attempts candidate keys in order of precedence for seamless key rotation.
  * @param {string} ciphertext - Stored credential string
  * @returns {string} Decrypted plaintext credential
  */
@@ -55,32 +71,44 @@ function decryptToken(ciphertext) {
 
   // Pass through mock or unencrypted legacy tokens
   if (!ciphertext.startsWith(PREFIX)) {
-    return ciphertext;
+    return ciphertext.trim();
   }
 
-  try {
-    const parts = ciphertext.slice(PREFIX.length).split(':');
-    if (parts.length !== 3) {
-      throw new Error('Invalid encrypted token format');
+  const parts = ciphertext.slice(PREFIX.length).split(':');
+  if (parts.length !== 3) {
+    throw new Error('Invalid encrypted token format');
+  }
+
+  const iv = Buffer.from(parts[0], 'hex');
+  const tag = Buffer.from(parts[1], 'hex');
+  const encrypted = Buffer.from(parts[2], 'hex');
+
+  const candidateKeys = getCandidateKeys();
+  let lastError = null;
+
+  for (const key of candidateKeys) {
+    try {
+      const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+      decipher.setAuthTag(tag);
+
+      const decrypted = Buffer.concat([
+        decipher.update(encrypted),
+        decipher.final()
+      ]);
+
+      let decryptedStr = decrypted.toString('utf8').trim();
+      // Safely strip enclosing single or double quotes if present
+      if ((decryptedStr.startsWith('"') && decryptedStr.endsWith('"')) ||
+          (decryptedStr.startsWith("'") && decryptedStr.endsWith("'"))) {
+        decryptedStr = decryptedStr.slice(1, -1).trim();
+      }
+      return decryptedStr;
+    } catch (err) {
+      lastError = err;
     }
-
-    const iv = Buffer.from(parts[0], 'hex');
-    const tag = Buffer.from(parts[1], 'hex');
-    const encrypted = Buffer.from(parts[2], 'hex');
-
-    const key = getEncryptionKey();
-    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
-    decipher.setAuthTag(tag);
-
-    const decrypted = Buffer.concat([
-      decipher.update(encrypted),
-      decipher.final()
-    ]);
-
-    return decrypted.toString('utf8');
-  } catch (err) {
-    throw new Error(`Failed to decrypt credential: ${err.message}`);
   }
+
+  throw new Error(`Failed to decrypt credential: ${lastError ? lastError.message : 'Authentication tag mismatch'}`);
 }
 
 module.exports = {

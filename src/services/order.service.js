@@ -18,6 +18,7 @@ const {
   buildOwnerNotificationPayload,
   buildCustomerDecisionNotificationPayload
 } = require('./whatsapp.service');
+const { getOwnerConsent } = require('./admin-restaurant.service');
 
 // Characters for human-friendly, uppercase alphanumeric references (excludes ambiguous 0/O, 1/I)
 const REFERENCE_CHARACTERS = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -405,32 +406,44 @@ async function confirmCustomerOrder({
       throw new Error(`[TENANT ERROR] Restaurant "${restaurant.name}" has no configured owner_phone.`);
     }
 
-    const ownerNotificationPayload = buildOwnerNotificationPayload({
-      ownerPhone: rawOwnerPhone,
-      order: createdOrder,
-      restaurantName: restaurant.name
-    });
+    const consent = getOwnerConsent(restaurant);
+    const hasConsent = consent.optedIn && !consent.revoked;
+    let createdOutboxMessage = null;
 
-    const createdOutboxMessage = await tx.outboxMessage.create({
-      data: {
-        restaurant_id: restaurantId,
-        recipient_phone: rawOwnerPhone,
-        message_type: 'OWNER_ORDER_NOTIFICATION',
-        payload: ownerNotificationPayload,
-        idempotency_key: `owner_notif_${createdOrder.id}`,
-        status: 'PENDING'
-      }
-    });
+    if (hasConsent) {
+      const ownerNotificationPayload = buildOwnerNotificationPayload({
+        ownerPhone: rawOwnerPhone,
+        order: createdOrder,
+        restaurantName: restaurant.name
+      });
 
-    await tx.orderNotification.create({
-      data: {
-        order_id: createdOrder.id,
-        restaurant_id: restaurantId,
-        recipient_phone: rawOwnerPhone,
-        notification_type: 'OWNER_ORDER_ALERT',
-        delivery_status: 'PENDING'
-      }
-    });
+      createdOutboxMessage = await tx.outboxMessage.create({
+        data: {
+          restaurant_id: restaurantId,
+          recipient_phone: rawOwnerPhone,
+          message_type: 'OWNER_ORDER_NOTIFICATION',
+          payload: ownerNotificationPayload,
+          idempotency_key: `owner_notif_${createdOrder.id}`,
+          status: 'PENDING'
+        }
+      });
+
+      await tx.orderNotification.create({
+        data: {
+          order_id: createdOrder.id,
+          restaurant_id: restaurantId,
+          recipient_phone: rawOwnerPhone,
+          notification_type: 'OWNER_ORDER_ALERT',
+          delivery_status: 'PENDING'
+        }
+      });
+    } else {
+      logger.warn('Skipping owner order notification: consent not granted or revoked', {
+        restaurantId,
+        ownerPhone: rawOwnerPhone,
+        consent
+      });
+    }
 
     // 7. Reset conversation session to IDLE
     await tx.conversationSession.update({
@@ -452,7 +465,7 @@ async function confirmCustomerOrder({
       orderReference: createdOrder.order_reference,
       restaurantId,
       customerPhone,
-      outboxId: createdOutboxMessage.id,
+      outboxId: createdOutboxMessage ? createdOutboxMessage.id : null,
       totalAmount: createdOrder.total_amount,
       orderType: createdOrder.order_type,
       status: createdOrder.status

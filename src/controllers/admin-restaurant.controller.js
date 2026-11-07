@@ -85,11 +85,27 @@ async function handleUpdateRestaurantStatus(req, res) {
   }
 }
 
+async function handleRetryOutbox(req, res) {
+  try {
+    const adminId = req.admin ? req.admin.id : null;
+    const result = await restaurantService.retryFailedOutboxMessages(req.params.id, adminId);
+    return res.status(200).json(result);
+  } catch (err) {
+    const status = err.statusCode || 500;
+    if (status >= 500) {
+      logger.error('Error retrying failed outbox messages', { error: err.message, restaurantId: req.params.id });
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+    return res.status(status).json({ error: err.message });
+  }
+}
+
 module.exports = {
   handleListRestaurants,
   handleCreateRestaurant,
   handleGetRestaurantById,
   handleUpdateRestaurant,
-  handleUpdateRestaurantStatus
+  handleUpdateRestaurantStatus,
+  handleRetryOutbox
 };
 

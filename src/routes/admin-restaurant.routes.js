@@ -10,7 +10,8 @@ const {
   handleCreateRestaurant,
   handleGetRestaurantById,
   handleUpdateRestaurant,
-  handleUpdateRestaurantStatus
+  handleUpdateRestaurantStatus,
+  handleRetryOutbox
 } = require('../controllers/admin-restaurant.controller');
 const { requireSuperAdminAuth } = require('../middleware/requireSuperAdminAuth');
 
@@ -31,6 +32,9 @@ router.put('/:id', handleUpdateRestaurant);
 
 // PATCH /api/admin/restaurants/:id/status — Activate, suspend, onboard, or offboard restaurant
 router.patch('/:id/status', handleUpdateRestaurantStatus);
+
+// POST /api/admin/restaurants/:id/retry-outbox — Retry eligible failed outbox messages after credential fix
+router.post('/:id/retry-outbox', handleRetryOutbox);
 
 module.exports = router;
 
