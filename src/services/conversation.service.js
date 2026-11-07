@@ -74,9 +74,10 @@ function calculateSessionExpiry() {
  * @param {string} restaurantId - Verified restaurant tenant UUID
  * @param {string} customerPhone - Customer WhatsApp sender phone number
  * @param {Object} rawOrderPayload - Incoming order payload from WhatsApp message
+ * @param {string|null} [senderName=null] - Customer profile name from Meta webhook
  * @returns {Promise<{success: boolean, session?: Object, cart?: Object, confirmationToken?: string, code?: string, error?: string, action?: Object}>}
  */
-async function processIncomingCart(restaurantId, customerPhone, rawOrderPayload) {
+async function processIncomingCart(restaurantId, customerPhone, rawOrderPayload, senderName = null) {
   if (!restaurantId || typeof restaurantId !== 'string') {
     throw new Error('[TENANT ERROR] processIncomingCart requires valid restaurantId');
   }
@@ -128,11 +129,16 @@ async function processIncomingCart(restaurantId, customerPhone, rawOrderPayload)
       ? existingSession.state
       : {};
 
+    const resolvedCustomerName = senderName || previousState.customerName || null;
+
     // Invalidate previous confirmation token and replace cart entirely
     const updatedState = {
       ...previousState,
       cart: normalizedCart,
       confirmationToken: freshConfirmationToken,
+      customerName: resolvedCustomerName,
+      address: null,
+      addressSaved: false,
       unsupportedCount: 0,
       cartUpdatedAt: new Date().toISOString()
     };
@@ -168,6 +174,8 @@ async function processIncomingCart(restaurantId, customerPhone, rawOrderPayload)
     confirmationToken: freshConfirmationToken
   });
 
+  const displayCustomerName = senderName || session.state?.customerName || null;
+
   return {
     success: true,
     session,
@@ -177,6 +185,7 @@ async function processIncomingCart(restaurantId, customerPhone, rawOrderPayload)
     action: {
       type: hasSaved ? 'PROMPT_ADDRESS_CHOICE' : 'PROMPT_ADDRESS_COLLECTION',
       nextStep,
+      customerName: displayCustomerName,
       itemCount: normalizedCart.itemCount,
       subtotal: normalizedCart.subtotal,
       savedAddresses: hasSaved ? savedAddresses.map(a => ({ id: a.id, address: a.address, label: a.label })) : []
@@ -218,33 +227,58 @@ function extractInteractiveIds(event) {
  * @returns {boolean}
  */
 function validateActionForStep(currentStep, buttonId, listId, state) {
+  // BTN_CANCEL_ORDER is universally allowed across all active ordering steps
+  if (buttonId === 'BTN_CANCEL_ORDER' || listId === 'BTN_CANCEL_ORDER') {
+    const cancellableSteps = new Set([
+      'AWAITING_ADDRESS_CHOICE',
+      'AWAITING_ADDRESS_INPUT',
+      'AWAITING_LOCATION',
+      'AWAITING_SAVE_CONSENT',
+      'AWAITING_ORDER_TYPE',
+      'AWAITING_CONFIRMATION',
+      'AWAITING_BUILDING_NAME',
+      'AWAITING_ROOM_NUMBER'
+    ]);
+    return cancellableSteps.has(currentStep);
+  }
+
   if (buttonId) {
     switch (currentStep) {
       case 'AWAITING_ADDRESS_CHOICE':
-        if (buttonId === 'BTN_USE_SAVED_ADDRESS' || buttonId.startsWith('BTN_USE_SAVED_ADDRESS:') || buttonId === 'BTN_ENTER_NEW_ADDRESS') {
-          return true;
-        }
-        return false;
+      case 'AWAITING_ADDRESS_INPUT':
+        return (
+          buttonId === 'BTN_SHARE_LOCATION' ||
+          buttonId === 'BTN_ENTER_MANUAL_ADDRESS' ||
+          buttonId === 'BTN_ENTER_NEW_ADDRESS' ||
+          buttonId === 'BTN_USE_SAVED_ADDRESS' ||
+          buttonId.startsWith('BTN_USE_SAVED_ADDRESS:')
+        );
+
+      case 'AWAITING_LOCATION':
+        return buttonId === 'BTN_ENTER_MANUAL_ADDRESS';
 
       case 'AWAITING_SAVE_CONSENT':
-        return buttonId === 'BTN_CONSENT_YES' || buttonId === 'BTN_CONSENT_NO';
+        return (
+          buttonId === 'BTN_CONSENT_YES' ||
+          buttonId === 'BTN_CONSENT_NO' ||
+          buttonId === 'BTN_SAVE_ADDRESS' ||
+          buttonId === 'BTN_USE_ONCE'
+        );
 
       case 'AWAITING_ORDER_TYPE':
         return buttonId === 'BTN_ORDER_DELIVERY' || buttonId === 'BTN_ORDER_TAKEAWAY';
 
       case 'AWAITING_CONFIRMATION':
-        if (buttonId === 'BTN_CANCEL_ORDER' || buttonId === 'BTN_CHANGE_ADDRESS') {
+        if (buttonId === 'BTN_CHANGE_ADDRESS') {
           return true;
         }
         if (buttonId.startsWith('BTN_CONFIRM_ORDER:')) {
           const token = buttonId.slice('BTN_CONFIRM_ORDER:'.length).trim();
-          // Token must match the active session confirmationToken
           return Boolean(token && state?.confirmationToken && token === state.confirmationToken);
         }
         return false;
 
       default:
-        // Buttons are not allowed in IDLE, AWAITING_CART, AWAITING_ADDRESS_INPUT, AWAITING_BUILDING_NAME, AWAITING_ROOM_NUMBER
         return false;
     }
   }
@@ -252,7 +286,13 @@ function validateActionForStep(currentStep, buttonId, listId, state) {
   if (listId) {
     switch (currentStep) {
       case 'AWAITING_ADDRESS_CHOICE':
-        return listId.startsWith('ADDR_SAVED_') || listId === 'BTN_ENTER_NEW_ADDRESS';
+      case 'AWAITING_ADDRESS_INPUT':
+        return (
+          listId.startsWith('ADDR_SAVED_') ||
+          listId === 'BTN_SHARE_LOCATION' ||
+          listId === 'BTN_ENTER_MANUAL_ADDRESS' ||
+          listId === 'BTN_ENTER_NEW_ADDRESS'
+        );
       default:
         return false;
     }
@@ -281,7 +321,7 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
 
   // 1. If message is a catalogue order cart submission, route directly to processIncomingCart
   if (event.messageType === 'order') {
-    return processIncomingCart(restaurantId, customerPhone, event.rawOrder || event.order);
+    return processIncomingCart(restaurantId, customerPhone, event.rawOrder || event.order, event.senderName);
   }
 
   const { buttonId, listId } = extractInteractiveIds(event);
@@ -343,11 +383,19 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
     // -------------------------------------------------------------
     if (currentStep === 'IDLE') {
       const isGreeting = GREETING_KEYWORDS.has(textBody.toLowerCase()) || textBody.length > 0;
+      const senderName = event.senderName || currentState.customerName || null;
+      const greetingName = senderName ? ` ${senderName}` : '';
+      const restaurant = await tx.restaurant.findUnique({
+        where: { id: restaurantId },
+        select: { name: true }
+      });
+      const restaurantName = restaurant ? restaurant.name : 'our restaurant';
 
       if (isGreeting) {
         const nextStep = 'AWAITING_CART';
         const updatedState = {
           ...currentState,
+          customerName: senderName,
           unsupportedCount: 0
         };
 
@@ -378,7 +426,8 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
           action: {
             type: 'SEND_WELCOME_CATALOG',
             nextStep,
-            message: 'Welcome! Please browse our menu catalogue below to place your order.'
+            customerName: senderName,
+            message: `Hello${greetingName} 👋\n\nWelcome to ${restaurantName}!\n\nWhat would you like to enjoy today?`
           }
         };
       }
@@ -394,14 +443,14 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
         },
         update: {
           current_step: nextStep,
-          state: { unsupportedCount: 0 },
+          state: { unsupportedCount: 0, customerName: senderName },
           expires_at: expiresAt
         },
         create: {
           restaurant_id: restaurantId,
           customer_phone: customerPhone,
           current_step: nextStep,
-          state: { unsupportedCount: 0 },
+          state: { unsupportedCount: 0, customerName: senderName },
           expires_at: expiresAt
         }
       });
@@ -412,7 +461,8 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
         action: {
           type: 'SEND_WELCOME_CATALOG',
           nextStep,
-          message: 'Welcome! Please browse our menu catalogue below to place your order.'
+          customerName: senderName,
+          message: `Hello${greetingName} 👋\n\nWelcome to ${restaurantName}!\n\nWhat would you like to enjoy today?`
         }
       };
     }
@@ -539,10 +589,80 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
         };
       }
 
+      // Universal Cancel Order Handler across any active ordering step
+      if (buttonId === 'BTN_CANCEL_ORDER' || listId === 'BTN_CANCEL_ORDER') {
+        const cancelResult = await cancelCustomerOrder({
+          restaurantId,
+          customerPhone,
+          txClient: tx
+        });
+
+        return {
+          success: true,
+          session: cancelResult.session,
+          action: {
+            type: 'ORDER_CANCELLED',
+            nextStep: 'IDLE',
+            message: 'Your order has been cancelled. Send "Hi" whenever you would like to order again.'
+          }
+        };
+      }
+
       // -------------------------------------------------------------
-      // 1. STATE: AWAITING_ADDRESS_CHOICE (Interactive Action Handler)
+      // 1. STATE: AWAITING_ADDRESS_CHOICE & AWAITING_ADDRESS_INPUT (Interactive Action Handler)
       // -------------------------------------------------------------
-      if (currentStep === 'AWAITING_ADDRESS_CHOICE') {
+      if (currentStep === 'AWAITING_ADDRESS_CHOICE' || currentStep === 'AWAITING_ADDRESS_INPUT') {
+        // Location Request flow
+        if (buttonId === 'BTN_SHARE_LOCATION' || listId === 'BTN_SHARE_LOCATION') {
+          const nextStep = 'AWAITING_LOCATION';
+          const updatedSession = await tx.conversationSession.update({
+            where: { id: session.id },
+            data: {
+              current_step: nextStep,
+              state: { ...currentState, unsupportedCount: 0 },
+              expires_at: expiresAt
+            }
+          });
+
+          return {
+            success: true,
+            session: updatedSession,
+            action: {
+              type: 'PROMPT_LOCATION_REQUEST',
+              nextStep,
+              message: 'Please tap the button below to share your delivery location pin 📍'
+            }
+          };
+        }
+
+        // Manual text address prompt
+        if (
+          buttonId === 'BTN_ENTER_MANUAL_ADDRESS' ||
+          listId === 'BTN_ENTER_MANUAL_ADDRESS' ||
+          buttonId === 'BTN_ENTER_NEW_ADDRESS' ||
+          listId === 'BTN_ENTER_NEW_ADDRESS'
+        ) {
+          const nextStep = 'AWAITING_ADDRESS_INPUT';
+          const updatedSession = await tx.conversationSession.update({
+            where: { id: session.id },
+            data: {
+              current_step: nextStep,
+              state: { ...currentState, unsupportedCount: 0 },
+              expires_at: expiresAt
+            }
+          });
+
+          return {
+            success: true,
+            session: updatedSession,
+            action: {
+              type: 'PROMPT_ADDRESS_INPUT',
+              nextStep,
+              message: 'Please type your complete delivery address (street, building, landmark, city) in one message:'
+            }
+          };
+        }
+
         const isUseSaved = buttonId === 'BTN_USE_SAVED_ADDRESS' ||
           buttonId?.startsWith('BTN_USE_SAVED_ADDRESS:') ||
           listId?.startsWith('ADDR_SAVED_');
@@ -596,7 +716,7 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
                 type: 'PROMPT_ORDER_TYPE',
                 nextStep,
                 address: normalized,
-                message: `Saved address selected:\n📍 ${normalized.addressText}\n\nPlease select your order type: 🚚 Delivery or 🥡 Takeaway.`
+                message: `Saved address selected:\n📍 ${normalized.addressText}\n\nHow would you like to receive your order?`
               }
             };
           }
@@ -614,13 +734,15 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
             action: {
               type: 'CONTEXTUAL_REPROMPT',
               currentStep: 'AWAITING_ADDRESS_CHOICE',
-              message: 'The selected saved address could not be found. Please select an address or choose Enter New Address.'
+              message: 'The selected saved address could not be found. Please select an address or choose Enter Manually.'
             }
           };
         }
+      }
 
-        // BTN_ENTER_NEW_ADDRESS
-        if (buttonId === 'BTN_ENTER_NEW_ADDRESS' || listId === 'BTN_ENTER_NEW_ADDRESS') {
+      // If in AWAITING_LOCATION and user taps Enter Manually
+      if (currentStep === 'AWAITING_LOCATION') {
+        if (buttonId === 'BTN_ENTER_MANUAL_ADDRESS' || listId === 'BTN_ENTER_MANUAL_ADDRESS') {
           const nextStep = 'AWAITING_ADDRESS_INPUT';
           const updatedSession = await tx.conversationSession.update({
             where: { id: session.id },
@@ -637,7 +759,7 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
             action: {
               type: 'PROMPT_ADDRESS_INPUT',
               nextStep,
-              message: 'Please provide your full delivery address (minimum 10 characters) or share your WhatsApp location pin.'
+              message: 'Please type your complete delivery address (street, building, landmark, city) in one message:'
             }
           };
         }
@@ -647,7 +769,7 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
       // 2. STATE: AWAITING_SAVE_CONSENT (Interactive Action Handler)
       // -------------------------------------------------------------
       if (currentStep === 'AWAITING_SAVE_CONSENT') {
-        if (buttonId === 'BTN_CONSENT_YES') {
+        if (buttonId === 'BTN_CONSENT_YES' || buttonId === 'BTN_SAVE_ADDRESS') {
           let savedRecord = null;
           let isDuplicate = false;
 
@@ -688,12 +810,12 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
               type: 'PROMPT_ORDER_TYPE',
               nextStep,
               addressSaved: true,
-              message: 'Address saved for future orders! Please select your order type: 🚚 Delivery or 🥡 Takeaway.'
+              message: 'Address saved! 📍\n\nHow would you like to receive your order?'
             }
           };
         }
 
-        if (buttonId === 'BTN_CONSENT_NO') {
+        if (buttonId === 'BTN_CONSENT_NO' || buttonId === 'BTN_USE_ONCE') {
           const nextStep = 'AWAITING_ORDER_TYPE';
           const updatedState = {
             ...currentState,
@@ -717,7 +839,7 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
               type: 'PROMPT_ORDER_TYPE',
               nextStep,
               addressSaved: false,
-              message: 'Got it, we will not save this address. Please select your order type: 🚚 Delivery or 🥡 Takeaway.'
+              message: 'How would you like to receive your order?'
             }
           };
         }
@@ -754,6 +876,7 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
             orderType: 'DELIVERY',
             address: currentState.address,
             restaurantName,
+            customerName: currentState.customerName || event.senderName || null,
             confirmationToken: currentState.confirmationToken
           });
 
@@ -801,6 +924,7 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
             orderType: 'TAKEAWAY',
             address: null,
             restaurantName,
+            customerName: currentState.customerName || event.senderName || null,
             confirmationToken: currentState.confirmationToken
           });
 
@@ -852,7 +976,7 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
             restaurantId,
             customerPhone,
             confirmationToken: token,
-            customerName: event.senderName,
+            customerName: currentState.customerName || event.senderName || null,
             txClient: tx
           });
 
@@ -870,6 +994,9 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
           }
 
           const order = confirmResult.order;
+          const displayCust = currentState.customerName || event.senderName || '';
+          const custGreeting = displayCust ? ` ${displayCust}` : '';
+
           return {
             success: true,
             order,
@@ -884,7 +1011,7 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
               orderType: order.order_type,
               message: confirmResult.isDuplicate
                 ? `Your order *${order.order_reference}* has already been confirmed and received by the restaurant!`
-                : `Thank you! Your order *${order.order_reference}* has been placed and is waiting for restaurant confirmation.`
+                : `Thank you${custGreeting}! Your order *${order.order_reference}* has been placed and is waiting for restaurant confirmation.`
             }
           };
         }
@@ -943,7 +1070,9 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
             action: {
               type: hasSaved ? 'PROMPT_ADDRESS_CHOICE' : 'PROMPT_ADDRESS_COLLECTION',
               nextStep,
+              customerName: currentState.customerName || null,
               confirmationToken: freshToken,
+              savedAddresses: hasSaved ? savedAddresses.map(a => ({ id: a.id, address: a.address, label: a.label })) : [],
               message: 'Please select or provide your new delivery address.'
             }
           };
@@ -972,15 +1101,32 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
     }
 
     // -------------------------------------------------------------
-    // STATE: AWAITING_ADDRESS_INPUT (Manual Text or Location Pin)
+    // STATES: AWAITING_ADDRESS_CHOICE, AWAITING_ADDRESS_INPUT, AWAITING_LOCATION
+    // (Manual Text Address or WhatsApp Location Pin)
     // -------------------------------------------------------------
-    if (currentStep === 'AWAITING_ADDRESS_INPUT') {
+    if (
+      currentStep === 'AWAITING_ADDRESS_CHOICE' ||
+      currentStep === 'AWAITING_ADDRESS_INPUT' ||
+      currentStep === 'AWAITING_LOCATION'
+    ) {
       // 1. WhatsApp Location Pin
       if (event.messageType === 'location') {
         const rawLoc = event.location || {};
         const coordCheck = validateCoordinates(rawLoc.latitude, rawLoc.longitude);
 
         if (coordCheck.isValid) {
+          const addrParts = [rawLoc.name, rawLoc.address].filter(Boolean);
+          const locationAddressText = addrParts.length > 0
+            ? addrParts.join(', ')
+            : `Pinned Location (${coordCheck.latitude.toFixed(4)}, ${coordCheck.longitude.toFixed(4)})`;
+
+          const normalized = normalizeAddress({
+            source: 'LOCATION_PIN',
+            addressText: locationAddressText,
+            latitude: coordCheck.latitude,
+            longitude: coordCheck.longitude
+          });
+
           const tempLocation = {
             latitude: coordCheck.latitude,
             longitude: coordCheck.longitude,
@@ -988,13 +1134,14 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
             address: rawLoc.address || null
           };
 
-          const nextStep = 'AWAITING_BUILDING_NAME';
+          const nextStep = 'AWAITING_SAVE_CONSENT';
           const updatedSession = await tx.conversationSession.update({
             where: { id: session.id },
             data: {
               current_step: nextStep,
               state: {
                 ...currentState,
+                address: normalized,
                 tempLocation,
                 unsupportedCount: 0
               },
@@ -1006,12 +1153,10 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
             success: true,
             session: updatedSession,
             action: {
-              type: 'VALID_LOCATION_INPUT',
+              type: 'PROMPT_SAVE_CONSENT',
               nextStep,
-              currentStep: 'AWAITING_ADDRESS_INPUT',
-              location: event.location,
-              tempLocation,
-              message: 'Location received! Please share your building name and room/flat number so the delivery person can locate you easily. First, what is your building or complex name?'
+              address: normalized,
+              message: `Address received! 📍\n\n${normalized.addressText}\n\nWould you like to save this address for future orders?`
             }
           };
         }
@@ -1036,7 +1181,7 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
             session: updatedSession,
             action: {
               type: 'CONTEXTUAL_REPROMPT',
-              currentStep: 'AWAITING_ADDRESS_INPUT',
+              currentStep,
               repromptCount: newCount,
               message: coordCheck.error || 'The location coordinates received were invalid. Please share your WhatsApp location pin again or enter your full text address.'
             }
@@ -1048,7 +1193,7 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
           session,
           action: {
             type: 'SILENT_FALLBACK',
-            currentStep: 'AWAITING_ADDRESS_INPUT',
+            currentStep,
             repromptCount: currentUnsupported,
             message: 'Maximum consecutive reminders reached. Going quiet.'
           }
@@ -1085,12 +1230,10 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
             success: true,
             session: updatedSession,
             action: {
-              type: 'VALID_TEXT_INPUT',
+              type: 'PROMPT_SAVE_CONSENT',
               nextStep,
-              currentStep: 'AWAITING_ADDRESS_INPUT',
-              text: textBody,
               address: normalized,
-              message: `Address received:\n📍 ${normalized.addressText}\n\nWould you like to save this address for future orders? Tap Yes or No.`
+              message: `Address received! 📍\n\n${normalized.addressText}\n\nWould you like to save this address for future orders?`
             }
           };
         }
@@ -1115,7 +1258,7 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
             session: updatedSession,
             action: {
               type: 'CONTEXTUAL_REPROMPT',
-              currentStep: 'AWAITING_ADDRESS_INPUT',
+              currentStep,
               repromptCount: newCount,
               message: textCheck.error || 'Please provide your full delivery address (minimum 10 characters) or share your location pin.'
             }
@@ -1127,7 +1270,7 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
           session,
           action: {
             type: 'SILENT_FALLBACK',
-            currentStep: 'AWAITING_ADDRESS_INPUT',
+            currentStep,
             repromptCount: currentUnsupported,
             message: 'Maximum consecutive reminders reached. Going quiet.'
           }
@@ -1358,9 +1501,11 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
 function getContextualPromptForStep(step) {
   switch (step) {
     case 'AWAITING_CART':
-      return 'Please browse our menu catalogue below to place your order.';
+      return 'Please browse our menu catalogue to select your items.';
     case 'AWAITING_ADDRESS_CHOICE':
-      return 'Please select whether to use your saved address or enter a new address.';
+      return 'Please select a delivery address option: Saved Address, Share Location, Enter Manually, or Cancel Order.';
+    case 'AWAITING_LOCATION':
+      return 'Please tap the button to share your location pin 📍 or choose Enter Manually.';
     case 'AWAITING_ADDRESS_INPUT':
       return 'Please provide your full delivery address (minimum 10 characters) or share your location pin.';
     case 'AWAITING_BUILDING_NAME':

@@ -72,10 +72,22 @@ function generateOrderReference(date = new Date(), suffixLength = 4) {
  * @param {string} params.orderType - 'DELIVERY' | 'TAKEAWAY'
  * @param {Object|null} [params.address] - Delivery address object (required for DELIVERY)
  * @param {string} [params.restaurantName] - Configured restaurant name
+ * @param {string} [params.customerName] - Customer display name
  * @param {string} [params.confirmationToken] - Active confirmation token
+ * @param {number} [params.deliveryFee=0] - Configured delivery charge (0 = Free)
+ * @param {number} [params.discount=0] - Configured discount amount
  * @returns {Object} Deterministic order summary
  */
-function buildOrderSummary({ cart, orderType, address = null, restaurantName = '', confirmationToken = null }) {
+function buildOrderSummary({
+  cart,
+  orderType,
+  address = null,
+  restaurantName = '',
+  customerName = null,
+  confirmationToken = null,
+  deliveryFee = 0,
+  discount = 0
+}) {
   if (!cart || !Array.isArray(cart.items) || cart.items.length === 0) {
     throw new Error('[ORDER ERROR] buildOrderSummary requires valid cart with items.');
   }
@@ -92,7 +104,8 @@ function buildOrderSummary({ cart, orderType, address = null, restaurantName = '
   let calculatedSubtotalCents = 0;
   const itemsSnapshot = cart.items.map(item => {
     const qty = item.quantity;
-    const priceCents = toIntegerCents(item.unitPrice);
+    const rawPrice = item.unitPrice !== undefined ? item.unitPrice : (item.price !== undefined ? item.price : item.item_price);
+    const priceCents = toIntegerCents(rawPrice);
     const lineTotalCents = qty * priceCents;
     calculatedSubtotalCents += lineTotalCents;
 
@@ -109,31 +122,45 @@ function buildOrderSummary({ cart, orderType, address = null, restaurantName = '
   const subtotal = fromIntegerCents(calculatedSubtotalCents);
   const currency = cart.currency || 'INR';
   const deliveryAddressText = orderType === 'DELIVERY' ? address.addressText.trim() : null;
+  const isDelivery = orderType === 'DELIVERY';
+  const displayCustomer = customerName ? customerName.trim() : null;
 
-  // Build human-readable formatted summary string
+  // Build human-readable formatted summary string matching reference UX
   const currencySymbol = currency === 'INR' ? '₹' : `${currency} `;
-  let summaryText = '📋 *ORDER SUMMARY*\n';
-  summaryText += '━━━━━━━━━━━━━━━━━━━━\n';
+  let summaryText = '*Confirm Your Order*\n━━━━━━━━━━━━━━━━━━━━\n';
 
-  for (const item of itemsSnapshot) {
-    summaryText += `• ${item.quantity}x ${item.productName} @ ${currencySymbol}${item.unitPrice.toFixed(2)} = ${currencySymbol}${item.lineTotal.toFixed(2)}\n`;
+  if (displayCustomer) {
+    summaryText += `👤 *${isDelivery ? 'Deliver To' : 'Customer'}:* ${displayCustomer}\n`;
   }
+  summaryText += `📦 *Order Type:* ${isDelivery ? 'Home Delivery' : 'Takeaway (Self-Pickup)'}\n`;
+
+  if (isDelivery) {
+    summaryText += `📍 *Address:* ${deliveryAddressText}\n`;
+  } else if (restaurantName) {
+    summaryText += `🏬 *Pickup At:* ${restaurantName}\n`;
+  }
+
+  summaryText += '\n*Items:*\n';
+  itemsSnapshot.forEach((item, index) => {
+    summaryText += `${index + 1}. ${item.productName} (x${item.quantity}) — ${currencySymbol}${item.lineTotal.toFixed(2)}\n`;
+  });
 
   summaryText += '━━━━━━━━━━━━━━━━━━━━\n';
   summaryText += `*Subtotal:* ${currencySymbol}${subtotal.toFixed(2)}\n`;
 
-  if (orderType === 'DELIVERY') {
-    summaryText += '*Fulfilment:* 🚚 Delivery\n';
-    summaryText += `*Delivery Address:*\n📍 ${deliveryAddressText}\n`;
-  } else {
-    summaryText += '*Fulfilment:* 🥡 Takeaway (Self-Pickup)\n';
-    if (restaurantName) {
-      summaryText += `*Pickup At:* ${restaurantName}\n`;
-    }
+  if (isDelivery) {
+    const feeText = deliveryFee > 0 ? `${currencySymbol}${deliveryFee.toFixed(2)}` : 'Free';
+    summaryText += `*Delivery:* ${feeText}\n`;
+  }
+  if (discount > 0) {
+    summaryText += `*Discount:* -${currencySymbol}${discount.toFixed(2)}\n`;
   }
 
+  const totalPayable = Math.max(0, subtotal + deliveryFee - discount);
+  const payMethodTag = isDelivery ? '(Pay COD)' : '(Pay at Counter)';
+  summaryText += `*Total Payable:* ${currencySymbol}${totalPayable.toFixed(2)} ${payMethodTag}\n`;
   summaryText += '━━━━━━━━━━━━━━━━━━━━\n';
-  summaryText += 'Please review and confirm your order below:';
+  summaryText += 'Please tap below to confirm or cancel your order:';
 
   return {
     items: itemsSnapshot,
@@ -141,11 +168,17 @@ function buildOrderSummary({ cart, orderType, address = null, restaurantName = '
     subtotal,
     currency,
     orderType,
+    customerName: displayCustomer,
     addressSnapshot: deliveryAddressText,
     latitude: (orderType === 'DELIVERY' && typeof address.latitude === 'number') ? address.latitude : null,
     longitude: (orderType === 'DELIVERY' && typeof address.longitude === 'number') ? address.longitude : null,
     confirmationToken,
-    summaryText
+    deliveryFee,
+    discount,
+    totalPayable,
+    total: totalPayable,
+    summaryText,
+    text: summaryText
   };
 }
 

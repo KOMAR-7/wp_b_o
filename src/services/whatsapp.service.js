@@ -387,104 +387,10 @@ function buildConversationReplyPayload({ action, recipientPhone, restaurantName 
   };
 
   switch (action.type) {
-    case 'SEND_WELCOME_CATALOG':
-    case 'REDIRECT_TO_CATALOG': {
-      let bodyText;
-      if (action.message) {
-        bodyText = action.message;
-      } else if (action.type === 'SEND_WELCOME_CATALOG') {
-        bodyText = rName
-          ? `Welcome to *${rName}*! 🥘\n\nPlease browse our menu catalogue to place your order.`
-          : 'Welcome! 🥘\n\nPlease browse our menu catalogue to place your order.';
-      } else {
-        bodyText = 'To select items or modify your order, please use our menu catalogue below.';
-      }
-
-      return {
-        messaging_product: 'whatsapp',
-        recipient_type: 'individual',
-        to: cleanPhone,
-        type: 'text',
-        text: {
-          preview_url: false,
-          body: bodyText.slice(0, 4096)
-        }
-      };
-    }
-
-    case 'PROMPT_ADDRESS_COLLECTION': {
-      const itemCount = action.itemCount || (Array.isArray(action.cart?.items) ? action.cart.items.length : null);
-      const subtotal = action.subtotal !== undefined ? action.subtotal : action.cart?.subtotal;
-      let bodyText = '';
-      if (itemCount !== null && subtotal !== undefined && subtotal !== null) {
-        bodyText += `🛒 *Cart Received:* ${itemCount} item(s) (₹${Number(subtotal).toFixed(2)})\n`;
-        bodyText += '━━━━━━━━━━━━━━━━━━━━\n';
-      }
-      bodyText += action.message || 'Please reply with your full delivery address (minimum 10 characters) or share your WhatsApp location pin 📍 so we know where to deliver your food.';
-
-      return {
-        messaging_product: 'whatsapp',
-        recipient_type: 'individual',
-        to: cleanPhone,
-        type: 'text',
-        text: {
-          preview_url: false,
-          body: bodyText.slice(0, 4096)
-        }
-      };
-    }
-
-    case 'PROMPT_ADDRESS_CHOICE': {
-      const saved = Array.isArray(action.savedAddresses) ? action.savedAddresses : [];
-      const bodyText = clampBody(
-        action.message || 'We found saved delivery addresses for your account. Please select whether to use a saved address or enter a new one:'
-      );
-
-      // If 1 or 2 saved addresses, send interactive buttons
-      if (saved.length <= 2) {
-        const buttons = [
-          {
-            type: 'reply',
-            reply: {
-              id: (saved.length === 1 && saved[0].id) ? `BTN_USE_SAVED_ADDRESS:${saved[0].id}` : 'BTN_USE_SAVED_ADDRESS',
-              title: '📍 Use Saved'.slice(0, 20)
-            }
-          },
-          {
-            type: 'reply',
-            reply: {
-              id: 'BTN_ENTER_NEW_ADDRESS',
-              title: '✍️ New Address'.slice(0, 20)
-            }
-          }
-        ];
-
-        return {
-          messaging_product: 'whatsapp',
-          recipient_type: 'individual',
-          to: cleanPhone,
-          type: 'interactive',
-          interactive: {
-            type: 'button',
-            body: { text: bodyText },
-            footer: { text: footerText },
-            action: { buttons }
-          }
-        };
-      }
-
-      // If > 2 saved addresses, send interactive list (up to 9 saved + 1 new address option = 10 rows max)
-      const rows = saved.slice(0, 9).map((addr, idx) => ({
-        id: `ADDR_SAVED_${addr.id}`.slice(0, 200),
-        title: (addr.label || `Address ${idx + 1}`).slice(0, 24),
-        description: (addr.address || '').slice(0, 72)
-      }));
-
-      rows.push({
-        id: 'BTN_ENTER_NEW_ADDRESS',
-        title: 'Enter New Address'.slice(0, 24),
-        description: 'Provide a different delivery address'.slice(0, 72)
-      });
+    case 'SEND_WELCOME_CATALOG': {
+      const greetingName = action.customerName ? ` ${action.customerName}` : '';
+      const welcomeRestaurant = rName || 'our restaurant';
+      const bodyText = action.message || `Hello${greetingName} 👋\n\nWelcome to ${welcomeRestaurant}!\n\nWhat would you like to enjoy today?`;
 
       return {
         messaging_product: 'whatsapp',
@@ -492,18 +398,149 @@ function buildConversationReplyPayload({ action, recipientPhone, restaurantName 
         to: cleanPhone,
         type: 'interactive',
         interactive: {
-          type: 'list',
-          body: { text: bodyText },
+          type: 'catalog_message',
+          body: { text: clampBody(bodyText) },
           footer: { text: footerText },
           action: {
-            button: 'Select Address'.slice(0, 20),
-            sections: [
-              {
-                title: 'Saved Addresses'.slice(0, 24),
-                rows
-              }
-            ]
+            name: 'catalog_message'
           }
+        }
+      };
+    }
+
+    case 'REDIRECT_TO_CATALOG': {
+      const bodyText = action.message || 'To select items or modify your order, please use our menu catalogue below.';
+      return {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: cleanPhone,
+        type: 'interactive',
+        interactive: {
+          type: 'catalog_message',
+          body: { text: clampBody(bodyText) },
+          footer: { text: footerText },
+          action: {
+            name: 'catalog_message'
+          }
+        }
+      };
+    }
+
+    case 'PROMPT_LOCATION_REQUEST': {
+      const bodyText = action.message || 'Please tap the button below to share your delivery location pin 📍';
+      return {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: cleanPhone,
+        type: 'interactive',
+        interactive: {
+          type: 'location_request_message',
+          body: { text: clampBody(bodyText) },
+          action: {
+            name: 'send_location'
+          }
+        }
+      };
+    }
+
+    case 'PROMPT_ADDRESS_COLLECTION':
+    case 'PROMPT_ADDRESS_CHOICE': {
+      const saved = Array.isArray(action.savedAddresses) ? action.savedAddresses : [];
+      const custGreeting = action.customerName ? `, ${action.customerName}` : '';
+      let defaultBody = `Select your delivery address${custGreeting}:`;
+
+      const itemCount = action.itemCount || (Array.isArray(action.cart?.items) ? action.cart.items.length : null);
+      const subtotal = action.subtotal !== undefined ? action.subtotal : action.cart?.subtotal;
+      let headerPrefix = '';
+      if (itemCount !== null && subtotal !== undefined && subtotal !== null) {
+        headerPrefix = `🛒 *Cart Received:* ${itemCount} item(s) (₹${Number(subtotal).toFixed(2)})\n━━━━━━━━━━━━━━━━━━━━\n`;
+      }
+
+      const bodyText = clampBody(headerPrefix + (action.message || defaultBody));
+
+      // If customer has saved addresses -> Send interactive list message with saved addresses + options
+      if (saved.length > 0) {
+        const rows = saved.slice(0, 7).map((addr, idx) => ({
+          id: `ADDR_SAVED_${addr.id}`.slice(0, 200),
+          title: (addr.label || `Address ${idx + 1}`).slice(0, 24),
+          description: (addr.address || '').slice(0, 72)
+        }));
+
+        rows.push({
+          id: 'BTN_SHARE_LOCATION',
+          title: '📍 Share Location'.slice(0, 24),
+          description: 'Share your WhatsApp location pin'.slice(0, 72)
+        });
+
+        rows.push({
+          id: 'BTN_ENTER_MANUAL_ADDRESS',
+          title: '✍️ Enter Manually'.slice(0, 24),
+          description: 'Type your full delivery address'.slice(0, 72)
+        });
+
+        rows.push({
+          id: 'BTN_CANCEL_ORDER',
+          title: '❌ Cancel Order'.slice(0, 24),
+          description: 'Cancel this ordering process'.slice(0, 72)
+        });
+
+        return {
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: cleanPhone,
+          type: 'interactive',
+          interactive: {
+            type: 'list',
+            body: { text: bodyText },
+            footer: { text: footerText },
+            action: {
+              button: 'Select Address'.slice(0, 20),
+              sections: [
+                {
+                  title: 'Delivery Options'.slice(0, 24),
+                  rows
+                }
+              ]
+            }
+          }
+        };
+      }
+
+      // If customer has NO saved addresses -> Send 3 interactive buttons (Share Location, Enter Manually, Cancel Order)
+      const buttons = [
+        {
+          type: 'reply',
+          reply: {
+            id: 'BTN_SHARE_LOCATION',
+            title: '📍 Share Location'.slice(0, 20)
+          }
+        },
+        {
+          type: 'reply',
+          reply: {
+            id: 'BTN_ENTER_MANUAL_ADDRESS',
+            title: '✍️ Enter Manually'.slice(0, 20)
+          }
+        },
+        {
+          type: 'reply',
+          reply: {
+            id: 'BTN_CANCEL_ORDER',
+            title: '❌ Cancel Order'.slice(0, 20)
+          }
+        }
+      ];
+
+      return {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: cleanPhone,
+        type: 'interactive',
+        interactive: {
+          type: 'button',
+          body: { text: bodyText },
+          footer: { text: footerText },
+          action: { buttons }
         }
       };
     }
@@ -514,8 +551,8 @@ function buildConversationReplyPayload({ action, recipientPhone, restaurantName 
       let bodyText = action.message;
       if (!bodyText) {
         bodyText = addressText
-          ? `📍 *Delivery Address:*\n${addressText}\n\nWould you like to save this address for future orders?`
-          : 'Would you like to save this delivery address for your future orders?';
+          ? `Address received! 📍\n\n${addressText}\n\nWould you like to save this address for future orders?`
+          : 'Address received! 📍\n\nWould you like to save this address for future orders?';
       }
 
       return {
@@ -533,14 +570,14 @@ function buildConversationReplyPayload({ action, recipientPhone, restaurantName 
                 type: 'reply',
                 reply: {
                   id: 'BTN_CONSENT_YES',
-                  title: '✅ Yes, Save'.slice(0, 20)
+                  title: '💾 Save Address'.slice(0, 20)
                 }
               },
               {
                 type: 'reply',
                 reply: {
                   id: 'BTN_CONSENT_NO',
-                  title: '❌ No, Just Once'.slice(0, 20)
+                  title: '⚡ Use Once'.slice(0, 20)
                 }
               }
             ]
@@ -550,7 +587,7 @@ function buildConversationReplyPayload({ action, recipientPhone, restaurantName 
     }
 
     case 'PROMPT_ORDER_TYPE': {
-      const bodyText = action.message || 'Please select your order type:\n\n🚚 Delivery\n🥡 Takeaway (Self-Pickup)';
+      const bodyText = action.message || 'How would you like to receive your order?';
 
       return {
         messaging_product: 'whatsapp',
@@ -567,7 +604,7 @@ function buildConversationReplyPayload({ action, recipientPhone, restaurantName 
                 type: 'reply',
                 reply: {
                   id: 'BTN_ORDER_DELIVERY',
-                  title: '🚚 Delivery'.slice(0, 20)
+                  title: '🚚 Home Delivery'.slice(0, 20)
                 }
               },
               {
@@ -575,6 +612,13 @@ function buildConversationReplyPayload({ action, recipientPhone, restaurantName 
                 reply: {
                   id: 'BTN_ORDER_TAKEAWAY',
                   title: '🥡 Takeaway'.slice(0, 20)
+                }
+              },
+              {
+                type: 'reply',
+                reply: {
+                  id: 'BTN_CANCEL_ORDER',
+                  title: '❌ Cancel Order'.slice(0, 20)
                 }
               }
             ]

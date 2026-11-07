@@ -58,6 +58,15 @@ function validateTextAddress(text) {
     };
   }
 
+  // Defense: Never mistake a customer's phone number or phone_number_id for a delivery address
+  const digitsOnly = trimmed.replace(/[\s\-\+\(\)]/g, '');
+  if (/^\d{7,16}$/.test(digitsOnly) && !/[a-zA-Z]/.test(trimmed)) {
+    return {
+      isValid: false,
+      error: 'A phone number cannot be used as a delivery address. Please provide your complete street address.'
+    };
+  }
+
   return {
     isValid: true,
     addressText: trimmed
@@ -209,13 +218,18 @@ function normalizeAddress({
   let formattedText = addressText ? addressText.trim() : '';
 
   if (source === 'LOCATION_PIN') {
-    if (!buildingName || !roomNumber) {
-      throw new Error('[ADDRESS ERROR] Location pin address requires both buildingName and roomNumber.');
+    if (buildingName && roomNumber) {
+      const cleanBuilding = buildingName.trim();
+      const cleanRoom = roomNumber.trim();
+      const extra = formattedText ? `, Area: ${formattedText}` : '';
+      formattedText = `Room/Flat: ${cleanRoom}, Building: ${cleanBuilding}${extra}`;
+    } else if (!formattedText) {
+      if (typeof latitude === 'number' && typeof longitude === 'number') {
+        formattedText = `Pinned Location (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`;
+      } else {
+        formattedText = 'Shared Location Pin';
+      }
     }
-    const cleanBuilding = buildingName.trim();
-    const cleanRoom = roomNumber.trim();
-    const extra = formattedText ? `, Area: ${formattedText}` : '';
-    formattedText = `Room/Flat: ${cleanRoom}, Building: ${cleanBuilding}${extra}`;
   }
 
   return {

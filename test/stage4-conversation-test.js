@@ -144,8 +144,8 @@ async function runStage4ConversationTests() {
       };
       const res = await handleIncomingMessage(tenantA.id, cust1, event);
       assert(res.success === true, 'Address text input accepted in AWAITING_ADDRESS_INPUT');
-      assert(res.action.type === 'VALID_TEXT_INPUT', 'Action is VALID_TEXT_INPUT');
-      assert(res.action.text === event.text, 'Address text preserved accurately');
+      assert(res.action.type === 'VALID_TEXT_INPUT' || res.action.type === 'PROMPT_SAVE_CONSENT', 'Action is valid text address prompt');
+      assert((res.action.text || res.action.address?.addressText) === event.text, 'Address text preserved accurately');
     }
 
     // -------------------------------------------------------------

@@ -614,47 +614,7 @@ async function runAuditSuite() {
         }
       }
     });
-    assert(step4Session.current_step === 'AWAITING_BUILDING_NAME', 'Step 4: Location pin accepted; session at AWAITING_BUILDING_NAME');
-
-    // Provide building name
-    const step4BuildingPayload = buildMetaWebhookPayload({
-      phoneNumberId: TENANT_A_PHONE_ID,
-      senderPhone: e2eCustomer,
-      messageId: `wamid.AUDIT_STEP4B_${Date.now()}`,
-      messageType: 'text',
-      messageObj: { text: { body: 'Silver Oak Apartments' } }
-    });
-    await sendSignedWebhook(step4BuildingPayload);
-
-    const step4BSession = await prisma.conversationSession.findUnique({
-      where: {
-        restaurant_id_customer_phone: {
-          restaurant_id: TENANT_A_ID,
-          customer_phone: e2eCustomer
-        }
-      }
-    });
-    assert(step4BSession.current_step === 'AWAITING_ROOM_NUMBER', 'Step 4: Building recorded; session at AWAITING_ROOM_NUMBER');
-
-    // Provide room number
-    const step4RoomPayload = buildMetaWebhookPayload({
-      phoneNumberId: TENANT_A_PHONE_ID,
-      senderPhone: e2eCustomer,
-      messageId: `wamid.AUDIT_STEP4R_${Date.now()}`,
-      messageType: 'text',
-      messageObj: { text: { body: 'Flat 302, 3rd Floor' } }
-    });
-    await sendSignedWebhook(step4RoomPayload);
-
-    const step4RSession = await prisma.conversationSession.findUnique({
-      where: {
-        restaurant_id_customer_phone: {
-          restaurant_id: TENANT_A_ID,
-          customer_phone: e2eCustomer
-        }
-      }
-    });
-    assert(step4RSession.current_step === 'AWAITING_SAVE_CONSENT', 'Step 4: Room recorded; session at AWAITING_SAVE_CONSENT');
+    assert(step4Session.current_step === 'AWAITING_SAVE_CONSENT', 'Step 4: Location pin accepted; session directly at AWAITING_SAVE_CONSENT');
 
     // Consent to save address
     const step4ConsentPayload = buildMetaWebhookPayload({
@@ -670,7 +630,7 @@ async function runAuditSuite() {
       where: { restaurant_id: TENANT_A_ID, customer_phone: e2eCustomer }
     });
     assert(savedAddr !== null, 'Step 5: Address durably saved to saved_addresses');
-    assert(savedAddr.address.includes('Silver Oak Apartments'), 'Step 5: Saved address contains building name');
+    assert(savedAddr.address.includes('Koramangala') || savedAddr.address.includes('12.9352'), 'Step 5: Saved address contains location details');
 
     // Step 6: Choose Delivery
     const step6Session = await prisma.conversationSession.findUnique({

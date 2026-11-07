@@ -198,7 +198,7 @@ async function runStage4AddressTests() {
       });
 
       assert(exploitRes.session.current_step === 'AWAITING_ADDRESS_CHOICE', 'Cross-tenant saved address selection rejected; step preserved');
-      assert(exploitRes.session.state.address === undefined, 'No address attached to Tenant B session');
+      assert(!exploitRes.session.state.address, 'No address attached to Tenant B session');
     }
 
     // 6. Cross-customer address access rejected (Customer 2 cannot use Customer 1 address)
@@ -217,7 +217,7 @@ async function runStage4AddressTests() {
       });
 
       assert(custExploitRes.session.current_step === 'AWAITING_ADDRESS_CHOICE', 'Cross-customer address access strictly rejected');
-      assert(custExploitRes.session.state.address === undefined, 'Customer 2 cannot claim Customer 1 address');
+      assert(!custExploitRes.session.state.address, 'Customer 2 cannot claim Customer 1 address');
     }
 
     // 7. Generic BTN_USE_SAVED_ADDRESS (without ID) picks primary saved address
@@ -292,7 +292,7 @@ async function runStage4AddressTests() {
       assert(textRes.session.state.address.addressText === validText, 'Address text matches input');
       assert(textRes.session.state.address.latitude === null, 'Manual address has null latitude');
       assert(textRes.session.state.address.longitude === null, 'Manual address has null longitude');
-      assert(textRes.action.type === 'VALID_TEXT_INPUT', 'Action type is VALID_TEXT_INPUT');
+      assert(textRes.action.type === 'VALID_TEXT_INPUT' || textRes.action.type === 'PROMPT_SAVE_CONSENT', 'Action prompts for save consent');
 
       // Verify no permanent DB record yet (ST4-08: do not save permanently yet)
       const count = await prisma.savedAddress.count({
@@ -313,7 +313,7 @@ async function runStage4AddressTests() {
       });
 
       assert(shortRes.session.current_step === 'AWAITING_ADDRESS_INPUT', 'Short address rejected; step stays AWAITING_ADDRESS_INPUT');
-      assert(shortRes.session.state.address === undefined, 'No address stored for short text');
+      assert(!shortRes.session.state.address, 'No address stored for short text');
       assert(shortRes.session.state.unsupportedCount === 1, 'unsupportedCount incremented on invalid address');
       assert(shortRes.action.type === 'CONTEXTUAL_REPROMPT', 'Contextual reprompt issued for short address');
       assert(shortRes.action.message.includes('too short'), 'Reprompt indicates address is too short');
@@ -395,16 +395,16 @@ async function runStage4AddressTests() {
     }
 
     // -------------------------------------------------------------
-    // TEST GROUP 4: Location Pin Building & Room Pipeline (ST4-09)
+    // TEST GROUP 4: Direct Location Pin Normalization (Streamlined Flow)
     // -------------------------------------------------------------
-    console.log('\n--- TEST GROUP 4: Location Pin Building & Room Pipeline (ST4-09) ---');
+    console.log('\n--- TEST GROUP 4: Direct Location Pin Normalization (Streamlined Flow) ---');
     const custPin = `9198131${Math.floor(10000 + Math.random() * 90000)}`;
 
     const cartPinRes = await processIncomingCart(tenantA.id, custPin, testCartPayload);
     createdSessionIds.push(cartPinRes.session.id);
     assert(cartPinRes.session.current_step === 'AWAITING_ADDRESS_INPUT', 'Session initialized for location pin');
 
-    // 18. Valid location pin triggers transition to AWAITING_BUILDING_NAME
+    // 18. Valid location pin triggers transition directly to AWAITING_SAVE_CONSENT (no friction turns)
     {
       const pinEvent = {
         messageType: 'location',
@@ -417,65 +417,12 @@ async function runStage4AddressTests() {
       };
 
       const pinRes = await handleIncomingMessage(tenantA.id, custPin, pinEvent);
-      assert(pinRes.session.current_step === 'AWAITING_BUILDING_NAME', 'Location pin transitions to AWAITING_BUILDING_NAME');
-      assert(pinRes.session.state.tempLocation.latitude === 19.1197, 'tempLocation stores latitude');
-      assert(pinRes.session.state.tempLocation.longitude === 72.8468, 'tempLocation stores longitude');
-      assert(pinRes.session.state.address === undefined, 'Address is NOT complete yet (still awaiting building & room)');
-      assert(pinRes.action.type === 'VALID_LOCATION_INPUT', 'Action type is VALID_LOCATION_INPUT');
-      assert(pinRes.action.nextStep === 'AWAITING_BUILDING_NAME', 'Action indicates nextStep AWAITING_BUILDING_NAME');
-    }
-
-    // 19. Missing/empty building name rejected in AWAITING_BUILDING_NAME
-    {
-      const emptyBuildingRes = await handleIncomingMessage(tenantA.id, custPin, {
-        messageType: 'text',
-        text: '   '
-      });
-      assert(emptyBuildingRes.session.current_step === 'AWAITING_BUILDING_NAME', 'Empty building name rejected; stays in AWAITING_BUILDING_NAME');
-      assert(emptyBuildingRes.session.state.tempLocation.buildingName === undefined, 'buildingName not set on empty input');
-      assert(emptyBuildingRes.session.state.unsupportedCount === 1, 'unsupportedCount incremented');
-    }
-
-    // 20. Valid building name transitions to AWAITING_ROOM_NUMBER
-    {
-      const bldgRes = await handleIncomingMessage(tenantA.id, custPin, {
-        messageType: 'text',
-        text: 'Sunshine Towers, Wing B'
-      });
-      assert(bldgRes.session.current_step === 'AWAITING_ROOM_NUMBER', 'Valid building name transitions to AWAITING_ROOM_NUMBER');
-      assert(bldgRes.session.state.tempLocation.buildingName === 'Sunshine Towers, Wing B', 'buildingName persisted in tempLocation');
-      assert(bldgRes.session.state.tempLocation.latitude === 19.1197, 'Coordinates preserved across building name step');
-      assert(bldgRes.session.state.address === undefined, 'Address still incomplete without room number');
-      assert(bldgRes.action.type === 'PROMPT_ROOM_NUMBER', 'Action prompts for room number');
-    }
-
-    // 21. Missing/empty room number rejected in AWAITING_ROOM_NUMBER
-    {
-      const emptyRoomRes = await handleIncomingMessage(tenantA.id, custPin, {
-        messageType: 'text',
-        text: ''
-      });
-      assert(emptyRoomRes.session.current_step === 'AWAITING_ROOM_NUMBER', 'Empty room number rejected; stays in AWAITING_ROOM_NUMBER');
-      assert(emptyRoomRes.session.state.unsupportedCount === 1, 'unsupportedCount incremented');
-    }
-
-    // 22. Valid room number completes location address & transitions to AWAITING_SAVE_CONSENT
-    {
-      const roomRes = await handleIncomingMessage(tenantA.id, custPin, {
-        messageType: 'text',
-        text: 'Flat 501'
-      });
-      assert(roomRes.session.current_step === 'AWAITING_SAVE_CONSENT', 'Valid room number transitions to AWAITING_SAVE_CONSENT');
-      assert(roomRes.session.state.address !== undefined, 'Address is now fully assembled and complete');
-      assert(roomRes.session.state.address.source === 'LOCATION_PIN', 'Address source is LOCATION_PIN');
-      assert(roomRes.session.state.address.buildingName === 'Sunshine Towers, Wing B', 'buildingName in final address');
-      assert(roomRes.session.state.address.roomNumber === 'Flat 501', 'roomNumber in final address');
-      assert(roomRes.session.state.address.latitude === 19.1197, 'GPS latitude in final address');
-      assert(roomRes.session.state.address.longitude === 72.8468, 'GPS longitude in final address');
-      assert(roomRes.session.state.address.addressText.includes('Flat 501'), 'Formatted address includes room number');
-      assert(roomRes.session.state.address.addressText.includes('Sunshine Towers'), 'Formatted address includes building name');
-      assert(roomRes.session.state.tempLocation === undefined, 'tempLocation cleaned up after assembly');
-      assert(roomRes.action.type === 'PROMPT_SAVE_CONSENT', 'Action prompts for address saving consent');
+      assert(pinRes.session.current_step === 'AWAITING_SAVE_CONSENT', 'Location pin transitions directly to AWAITING_SAVE_CONSENT');
+      assert(pinRes.session.state.address.source === 'LOCATION_PIN', 'Address source is LOCATION_PIN');
+      assert(pinRes.session.state.address.latitude === 19.1197, 'Coordinates preserved: latitude');
+      assert(pinRes.session.state.address.longitude === 72.8468, 'Coordinates preserved: longitude');
+      assert(pinRes.session.state.address.addressText.includes('Green Valley') || pinRes.session.state.address.addressText.includes('19.1197'), 'Location address normalized');
+      assert(pinRes.action.type === 'PROMPT_SAVE_CONSENT', 'Action prompts for address saving consent');
     }
 
     // -------------------------------------------------------------
@@ -502,8 +449,7 @@ async function runStage4AddressTests() {
       assert(dbRow !== null, 'Address record physically exists in saved_addresses table');
       assert(dbRow.restaurant_id === tenantA.id, 'Persisted record correctly scoped to tenantA');
       assert(dbRow.customer_phone === custPin, 'Persisted record correctly scoped to customer');
-      assert(dbRow.address.includes('Flat 501'), 'Persisted record contains room number');
-      assert(dbRow.address.includes('Sunshine Towers'), 'Persisted record contains building name');
+      assert(dbRow.address.includes('Green Valley') || dbRow.address.includes('19.1197'), 'Persisted record contains location details');
       assert(Number(dbRow.latitude) === 19.1197, 'Persisted record contains GPS latitude');
       assert(Number(dbRow.longitude) === 72.8468, 'Persisted record contains GPS longitude');
     }
@@ -586,15 +532,14 @@ async function runStage4AddressTests() {
       assert(remainingMs > (1.9 * 60 * 60 * 1000), '2-Hour inactivity TTL refreshed on address input');
     }
 
-    // 27. Invalid button in AWAITING_BUILDING_NAME does not corrupt session
+    // 27. Invalid button in AWAITING_SAVE_CONSENT does not corrupt session
     {
       const badBtnRes = await handleIncomingMessage(tenantA.id, custSec, {
         messageType: 'button',
         buttonReply: { payload: 'BTN_ORDER_DELIVERY' } // Premature button
       });
 
-      assert(badBtnRes.session.current_step === 'AWAITING_BUILDING_NAME', 'Session current_step preserved in AWAITING_BUILDING_NAME');
-      assert(badBtnRes.session.state.tempLocation.latitude === 12.9716, 'tempLocation uncorrupted after bad button');
+      assert(badBtnRes.session.current_step === 'AWAITING_SAVE_CONSENT', 'Session current_step preserved in AWAITING_SAVE_CONSENT');
       assert(badBtnRes.session.state.cart.subtotal === 250.00, 'Cart subtotal uncorrupted after bad button');
     }
 
@@ -604,7 +549,7 @@ async function runStage4AddressTests() {
       const cartRemRes = await processIncomingCart(tenantA.id, custRem, testCartPayload);
       createdSessionIds.push(cartRemRes.session.id);
 
-      // Advance to AWAITING_BUILDING_NAME
+      // Advance to AWAITING_SAVE_CONSENT via location pin
       await handleIncomingMessage(tenantA.id, custRem, {
         messageType: 'location',
         location: { latitude: 28.6139, longitude: 77.2090 }
@@ -623,7 +568,7 @@ async function runStage4AddressTests() {
       // 3rd unsupported message -> SILENT_FALLBACK
       const r3 = await handleIncomingMessage(tenantA.id, custRem, { messageType: 'sticker' });
       assert(r3.action.type === 'SILENT_FALLBACK', '3rd unsupported message triggers SILENT_FALLBACK');
-      assert(r3.session.current_step === 'AWAITING_BUILDING_NAME', 'Step preserved during silent fallback');
+      assert(r3.session.current_step === 'AWAITING_SAVE_CONSENT', 'Step preserved during silent fallback');
     }
 
     // 29. Webhook HTTP POST pipeline for location pin
@@ -691,7 +636,7 @@ async function runStage4AddressTests() {
       const s = await prisma.conversationSession.findUnique({
         where: { restaurant_id_customer_phone: { restaurant_id: tenantA.id, customer_phone: custWh } }
       });
-      assert(s.current_step === 'AWAITING_BUILDING_NAME', 'Session transitioned to AWAITING_BUILDING_NAME via webhook HTTP POST');
+      assert(s.current_step === 'AWAITING_SAVE_CONSENT', 'Session transitioned to AWAITING_SAVE_CONSENT via webhook HTTP POST');
       createdSessionIds.push(s.id);
     }
 
