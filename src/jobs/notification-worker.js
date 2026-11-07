@@ -53,13 +53,27 @@ class NotificationWorker {
       });
 
       if (dispatchSummary.processedCount > 0) {
-        logger.info('Notification worker processed outbox batch', {
+        const batchLog = {
           workerId: this.workerId,
           processed: dispatchSummary.processedCount,
           succeeded: dispatchSummary.succeededCount,
           uncertain: dispatchSummary.uncertainCount,
           failed: dispatchSummary.failedCount
-        });
+        };
+
+        if (dispatchSummary.failedCount > 0 || dispatchSummary.uncertainCount > 0) {
+          batchLog.failures = (dispatchSummary.results || [])
+            .filter(r => !r.dispatchResult?.success)
+            .map(r => ({
+              id: r.id,
+              status: r.outcome?.status,
+              isRetryable: r.dispatchResult?.isRetryable,
+              error: (r.dispatchResult?.error || '').slice(0, 150)
+            }));
+          logger.warn('Notification worker processed outbox batch with errors', batchLog);
+        } else {
+          logger.info('Notification worker processed outbox batch', batchLog);
+        }
       }
 
       // 2. Run periodic maintenance tasks (session cleanup & order timeout)

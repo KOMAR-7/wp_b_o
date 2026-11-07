@@ -52,6 +52,27 @@ async function recordIncomingEvent(event) {
     ...(event.status ? { status: event.status, recipientId: event.recipientId } : {})
   };
 
+  // Fast-path idempotency check: Safely identify duplicate webhook retries without database constraint collisions
+  try {
+    const existing = await prisma.webhookEvent.findUnique({
+      where: { event_key: eventKey },
+      select: { id: true, event_key: true, processing_status: true }
+    });
+
+    if (existing) {
+      logger.info('Duplicate webhook event detected via event_key lookup; safely ignored', {
+        eventKey,
+        phoneNumberId: event.phoneNumberId
+      });
+      return { isDuplicate: true, eventRecord: existing };
+    }
+  } catch (lookupErr) {
+    logger.warn('Pre-check for duplicate webhook event encountered warning, proceeding to insert', {
+      eventKey,
+      error: lookupErr.message
+    });
+  }
+
   try {
     const eventRecord = await prisma.webhookEvent.create({
       data: {
@@ -71,9 +92,9 @@ async function recordIncomingEvent(event) {
 
     return { isDuplicate: false, eventRecord };
   } catch (err) {
-    // Prisma P2002 is Unique constraint violation on event_key
+    // Prisma P2002: Unique constraint violation on event_key in simultaneous race condition
     if (err.code === 'P2002') {
-      logger.info('Duplicate webhook event detected via event_key; safely ignored', {
+      logger.info('Duplicate webhook event race condition caught via P2002; safely ignored', {
         eventKey,
         phoneNumberId: event.phoneNumberId
       });

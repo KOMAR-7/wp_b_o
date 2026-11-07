@@ -337,6 +337,51 @@ async function updateOutboxResult({
 }
 
 /**
+ * Classifies outbox dispatch failures into standardized, sanitized categories.
+ *
+ * @param {Object} dispatchResult - Result from sendWhatsAppMessage or customSender
+ * @param {string} [rawError] - Error message string
+ * @returns {string} Sanitized failure category
+ */
+function classifyFailureCategory(dispatchResult, rawError = '') {
+  const errStr = (rawError || dispatchResult?.error || '').toLowerCase();
+  const statusCode = dispatchResult?.statusCode;
+
+  if (errStr.includes('[credential error]')) {
+    if (errStr.includes('begin with "eaa"') || errStr.includes('invalid whatsapp access token') || errStr.includes('format is invalid')) {
+      return 'INVALID_ACCESS_TOKEN_FORMAT';
+    }
+    if (errStr.includes('decrypt') || errStr.includes('key mismatch') || errStr.includes('corrupted data')) {
+      return 'TOKEN_DECRYPTION_FAILED';
+    }
+    if (errStr.includes('inactive or suspended')) {
+      return 'TENANT_INACTIVE_OR_SUSPENDED';
+    }
+    return 'CREDENTIAL_RESOLUTION_ERROR';
+  }
+
+  if (dispatchResult?.isAuthError || statusCode === 401) {
+    return 'META_AUTHENTICATION_ERROR_401';
+  }
+
+  if (dispatchResult?.isTimeout) {
+    return 'DISPATCH_TIMEOUT';
+  }
+
+  if (typeof statusCode === 'number') {
+    if (statusCode === 429) return 'META_RATE_LIMIT_429';
+    if (statusCode >= 500) return 'META_SERVER_ERROR_5XX';
+    if (statusCode >= 400) return 'META_CLIENT_ERROR_4XX';
+  }
+
+  if (errStr.includes('blocked_template_not_configured')) {
+    return 'BLOCKED_TEMPLATE_NOT_CONFIGURED';
+  }
+
+  return 'DISPATCH_ERROR';
+}
+
+/**
  * High-level outbox dispatcher runner.
  * Claims messages atomically, closes DB transaction, dispatches to Meta, and fences result.
  *
@@ -416,6 +461,31 @@ async function dispatchPendingOutboxMessages({
     if (updateOutcome.status === 'ACCEPTED') succeededCount++;
     else if (updateOutcome.status === 'UNCERTAIN_DISPATCH') uncertainCount++;
     else if (updateOutcome.status === 'FAILED') failedCount++;
+
+    // Detailed failure visibility: Log rich context for any non-successful outcome
+    if (!dispatchResult.success) {
+      const failureCategory = classifyFailureCategory(dispatchResult, dispatchResult.error);
+      const isRetryAllowed = Boolean(dispatchResult.isRetryable && msg.attempts < maxAttempts);
+
+      // Redact sensitive tokens from log messages
+      let sanitizedError = dispatchResult.error || 'Unknown dispatch failure';
+      sanitizedError = sanitizedError.replace(/EAA[A-Za-z0-9_-]+/g, '[REDACTED_TOKEN]');
+
+      logger.warn('Outbox message dispatch failed', {
+        outboxId: msg.id,
+        restaurantId: msg.restaurant_id,
+        messageType: msg.message_type,
+        category: failureCategory,
+        statusCode: dispatchResult.statusCode || null,
+        metaErrorCode: dispatchResult.metaErrorCode || null,
+        isRetryable: Boolean(dispatchResult.isRetryable),
+        isRetryAllowed,
+        attempts: msg.attempts,
+        maxAttempts,
+        status: updateOutcome.status,
+        error: sanitizedError
+      });
+    }
 
     results.push({
       id: msg.id,
