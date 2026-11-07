@@ -331,6 +331,8 @@
           let waBadge = '';
           if (r.whatsapp_status === 'REQUIRES_REAUTH') {
             waBadge = `<div style="margin-top: 4px;"><span class="badge badge-danger">⚠️ 401 Re-Auth Required</span></div>`;
+          } else if (r.whatsapp_status === 'BLOCKED_TEMPLATE_NOT_CONFIGURED') {
+            waBadge = `<div style="margin-top: 4px;"><span class="badge badge-warning">⚠️ Template Not Configured</span></div>`;
           } else if (r.whatsapp_status === 'NOT_CONFIGURED') {
             waBadge = `<div style="margin-top: 4px;"><span class="badge badge-secondary">WA Not Configured</span></div>`;
           } else {
@@ -401,6 +403,8 @@
       if (waStatusEl) {
         if (r.whatsapp_status === 'REQUIRES_REAUTH') {
           waStatusEl.innerHTML = '<span class="badge badge-danger">⚠️ 401 Re-Auth Required</span>';
+        } else if (r.whatsapp_status === 'BLOCKED_TEMPLATE_NOT_CONFIGURED') {
+          waStatusEl.innerHTML = '<span class="badge badge-warning">⚠️ Template Not Configured</span>';
         } else if (r.whatsapp_status === 'NOT_CONFIGURED') {
           waStatusEl.innerHTML = '<span class="badge badge-secondary">Not Configured</span>';
         } else {
@@ -410,10 +414,12 @@
 
       const consentEl = document.getElementById('view-res-consent');
       if (consentEl) {
-        if (r.owner_consent && r.owner_consent.hasConsent) {
-          consentEl.innerHTML = `<span class="badge badge-success">Opted In (${escapeHtml(r.owner_consent.source || 'onboarding')})</span>`;
+        if (r.owner_consent && r.owner_consent.optedIn && !r.owner_consent.revoked) {
+          consentEl.innerHTML = `<span class="badge badge-success">✅ Consented (${escapeHtml(r.owner_consent.source || 'VERIFIED')})</span>`;
+        } else if (r.owner_consent && r.owner_consent.revoked) {
+          consentEl.innerHTML = `<span class="badge badge-danger">❌ Revoked (${escapeHtml(r.owner_consent.revokedReason || 'Admin')})</span>`;
         } else {
-          consentEl.innerHTML = '<span class="badge badge-secondary">Not Opted In</span>';
+          consentEl.innerHTML = '<span class="badge badge-secondary">⚠️ Not Consented</span>';
         }
       }
 
@@ -497,6 +503,11 @@
       document.getElementById('edit-res-notes').value = r.internal_notes || '';
       const tokenInput = document.getElementById('edit-res-token');
       if (tokenInput) tokenInput.value = '';
+
+      const consentCheckbox = document.getElementById('edit-res-consent');
+      if (consentCheckbox) {
+        consentCheckbox.checked = Boolean(r.owner_consent && r.owner_consent.optedIn && !r.owner_consent.revoked);
+      }
 
       openModal('modal-edit-restaurant');
     } catch (err) {
@@ -911,6 +922,9 @@
       e.preventDefault();
       const formData = new FormData(e.target);
       const payload = Object.fromEntries(formData.entries());
+      payload.owner_consent_verified = document.getElementById('create-res-consent')
+        ? document.getElementById('create-res-consent').checked
+        : false;
 
       try {
         await apiCall('/api/admin/restaurants', {
@@ -930,6 +944,9 @@
       const id = document.getElementById('edit-res-id').value;
       const formData = new FormData(e.target);
       const payload = Object.fromEntries(formData.entries());
+      payload.owner_consent_verified = document.getElementById('edit-res-consent')
+        ? document.getElementById('edit-res-consent').checked
+        : false;
 
       // If access_token empty or whitespace, remove so it is never sent or overwritten
       if (!payload.access_token || !payload.access_token.trim()) {

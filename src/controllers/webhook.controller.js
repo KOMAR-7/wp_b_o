@@ -89,9 +89,9 @@ async function handleIncomingEvent(req, res) {
           continue;
         }
 
-        // Check if message is an owner interactive action (e.g. OWNER_ACCEPT:<id> or OWNER_REJECT:<id>)
+        // Check if message is an owner interactive action (e.g. OWNER_ACCEPT:<id>, OWNER_REJECT:<id>, or signed OWNER_SIG:)
         const actionPayload = event.interactiveReply?.id || event.buttonReply?.payload || null;
-        if (actionPayload && typeof actionPayload === 'string' && actionPayload.startsWith('OWNER_')) {
+        if (actionPayload && typeof actionPayload === 'string' && (actionPayload.startsWith('OWNER_') || actionPayload.startsWith('OWNER_SIG:'))) {
           logger.info('Received owner decision interactive payload', {
             phoneNumberId: event.phoneNumberId,
             senderPhone: event.senderPhone,

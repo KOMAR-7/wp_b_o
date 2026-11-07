@@ -10,6 +10,8 @@ const config = {
   port: parseInt(process.env.PORT || '3000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
   databaseUrl: process.env.DATABASE_URL || '',
+  encryptionKey: process.env.ENCRYPTION_KEY || '',
+  ownerCallbackSecret: process.env.OWNER_CALLBACK_SECRET || '',
   meta: {
     verifyToken: process.env.META_VERIFY_TOKEN || '',
     appSecret: process.env.META_APP_SECRET || '',
@@ -28,6 +30,7 @@ function validateConfig(testConfig = config) {
   if (!testConfig.databaseUrl) missing.push('DATABASE_URL');
   if (!testConfig.meta.verifyToken) missing.push('META_VERIFY_TOKEN');
   if (!testConfig.meta.appSecret) missing.push('META_APP_SECRET');
+  if (!testConfig.encryptionKey) missing.push('ENCRYPTION_KEY');
 
   if (missing.length > 0) {
     if (testConfig.nodeEnv === 'production') {

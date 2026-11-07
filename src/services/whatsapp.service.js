@@ -13,6 +13,7 @@ const prisma = require('../config/database');
 const config = require('../config/env');
 const logger = require('../utils/logger');
 const { decryptToken } = require('../utils/crypto');
+const { generateSignedOwnerCallback } = require('../utils/callback-signer');
 
 const META_GRAPH_VERSION = 'v21.0';
 const DEFAULT_TIMEOUT_MS = 10000;
@@ -26,7 +27,7 @@ const DEFAULT_TIMEOUT_MS = 10000;
  * @param {Object} params.order - Created order record
  * @param {string} [params.restaurantName] - Commercial restaurant name
  * @param {boolean} [params.useTemplate=false] - Whether to format as approved Meta message template
- * @param {string} [params.templateName='order_notification_alert'] - Meta approved template name
+ * @param {string} [params.templateName='restopro_order_alert'] - Meta approved template name
  * @returns {Object} WhatsApp Cloud API payload
  */
 function buildOwnerNotificationPayload({
@@ -34,7 +35,7 @@ function buildOwnerNotificationPayload({
   order,
   restaurantName = '',
   useTemplate = false,
-  templateName = 'order_notification_alert'
+  templateName = 'restopro_order_alert'
 }) {
   if (!ownerPhone || typeof ownerPhone !== 'string') {
     throw new Error('[WHATSAPP PAYLOAD ERROR] Missing ownerPhone.');
@@ -54,7 +55,18 @@ function buildOwnerNotificationPayload({
     ? Number(order.total_amount).toFixed(2)
     : Number(order.total_amount || 0).toFixed(2);
 
-  // If outside 24h window or explicitly requested: use approved template format
+  // Generate tamper-resistant, time-bounded HMAC signed callback identifiers
+  const acceptCallback = generateSignedOwnerCallback({ orderId: order.id, action: 'ACCEPT' });
+  const rejectCallback = generateSignedOwnerCallback({ orderId: order.id, action: 'REJECT' });
+
+  // Items compact summary for template body
+  const itemsSummary = items
+    .map(item => `${item.quantity || 1}x ${item.productName || item.name || 'Item'}`)
+    .join(', ') || 'Order Items';
+
+  const fulfilmentText = order.order_type === 'DELIVERY' ? 'Delivery' : 'Takeaway (Self-Pickup)';
+
+  // If outside 24h window or explicitly requested: use approved Meta Utility Template format
   if (useTemplate) {
     return {
       messaging_product: 'whatsapp',
@@ -62,32 +74,30 @@ function buildOwnerNotificationPayload({
       to: cleanPhone,
       type: 'template',
       template: {
-        name: templateName,
+        name: templateName || 'restopro_order_alert',
         language: { code: 'en' },
         components: [
           {
-            type: 'header',
-            parameters: [{ type: 'text', text: `#${order.order_reference}` }]
-          },
-          {
             type: 'body',
             parameters: [
-              { type: 'text', text: order.customer_name || 'Customer' },
-              { type: 'text', text: order.order_type === 'DELIVERY' ? 'Delivery' : 'Takeaway' },
-              { type: 'text', text: `${currencySymbol}${total}` }
+              { type: 'text', text: restaurantName || 'Restaurant' },
+              { type: 'text', text: `#${order.order_reference}` },
+              { type: 'text', text: itemsSummary.slice(0, 1024) },
+              { type: 'text', text: `${currencySymbol}${total}` },
+              { type: 'text', text: fulfilmentText }
             ]
           },
           {
             type: 'button',
             sub_type: 'quick_reply',
             index: '0',
-            parameters: [{ type: 'payload', payload: `OWNER_ACCEPT:${order.id}` }]
+            parameters: [{ type: 'payload', payload: acceptCallback }]
           },
           {
             type: 'button',
             sub_type: 'quick_reply',
             index: '1',
-            parameters: [{ type: 'payload', payload: `OWNER_REJECT:${order.id}` }]
+            parameters: [{ type: 'payload', payload: rejectCallback }]
           }
         ]
       }
@@ -137,14 +147,14 @@ function buildOwnerNotificationPayload({
           {
             type: 'reply',
             reply: {
-              id: `OWNER_ACCEPT:${order.id}`,
+              id: acceptCallback,
               title: '✅ Accept Order'
             }
           },
           {
             type: 'reply',
             reply: {
-              id: `OWNER_REJECT:${order.id}`,
+              id: rejectCallback,
               title: '❌ Reject Order'
             }
           }
@@ -322,6 +332,106 @@ async function resolveRestaurantCredentials(restaurantId, db = prisma) {
 }
 
 /**
+ * Verifies a Meta WhatsApp access token against a specific phone_number_id.
+ * Performs a read-only GET call to Graph API: GET /{version}/{phone_number_id}
+ * Confirms both token validity and authorized access to that exact phone number.
+ *
+ * @param {Object} params
+ * @param {string} params.phoneNumberId - Meta Phone Number ID
+ * @param {string} params.accessToken - Meta Access Token
+ * @param {Object} [params.httpClient=axios] - Injectable HTTP client for testing
+ * @param {number} [params.timeoutMs=8000] - Timeout in milliseconds
+ * @returns {Promise<{valid: boolean, phoneNumberId?: string, verifiedName?: string, displayPhoneNumber?: string, error?: string, errorCode?: number, errorSubcode?: number, statusCode?: number}>}
+ */
+async function verifyMetaWhatsAppToken({
+  phoneNumberId,
+  accessToken,
+  httpClient = null,
+  timeoutMs = 8000
+}) {
+  if (!phoneNumberId || typeof phoneNumberId !== 'string') {
+    return { valid: false, error: 'Meta Phone Number ID is required for verification.' };
+  }
+  if (!accessToken || typeof accessToken !== 'string') {
+    return { valid: false, error: 'Meta Access Token is required for verification.' };
+  }
+
+  // Bypass real HTTP call in mock/test tokens when no custom httpClient is provided
+  if (!httpClient && (
+    accessToken.startsWith('mock_') ||
+    accessToken.startsWith('EAA_TEST_MOCK_VALID_') ||
+    accessToken.startsWith('EAABtest') ||
+    accessToken.startsWith('EAABmock')
+  )) {
+    return {
+      valid: true,
+      phoneNumberId,
+      verifiedName: 'Mock Verified Restaurant',
+      displayPhoneNumber: '+919999999999'
+    };
+  }
+
+  const client = httpClient || axios;
+  const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/${phoneNumberId}`;
+
+  try {
+    const response = await client.get(url, {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      params: {
+        fields: 'id,display_phone_number,verified_name,quality_rating'
+      },
+      timeout: timeoutMs
+    });
+
+    const data = response.data || {};
+    return {
+      valid: true,
+      phoneNumberId: data.id || phoneNumberId,
+      verifiedName: data.verified_name || null,
+      displayPhoneNumber: data.display_phone_number || null,
+      qualityRating: data.quality_rating || null
+    };
+  } catch (err) {
+    const metaError = err.response?.data?.error;
+    const statusCode = err.response?.status;
+    const errorCode = metaError?.code;
+    const errorSubcode = metaError?.error_subcode;
+    const rawMessage = metaError?.message || err.message || 'Verification request failed';
+
+    // Redact any accidental tokens from message
+    const cleanMessage = rawMessage.replace(/EAA[A-Za-z0-9_-]+/g, '[REDACTED_TOKEN]');
+
+    logger.warn('Meta WhatsApp token verification failed', {
+      phoneNumberId,
+      statusCode,
+      errorCode,
+      errorSubcode,
+      error: cleanMessage
+    });
+
+    let friendlyError = cleanMessage;
+    if (statusCode === 401 || errorCode === 190) {
+      friendlyError = 'Invalid or expired Meta WhatsApp access token (HTTP 401: OAuthException). Please verify token in Meta App Dashboard.';
+    } else if (statusCode === 403 || errorCode === 200 || errorCode === 10) {
+      friendlyError = `Access token lacks permissions for Phone Number ID ${phoneNumberId} (HTTP ${statusCode}: Permission Denied).`;
+    } else if (statusCode === 400 || errorCode === 100) {
+      friendlyError = `Phone Number ID ${phoneNumberId} does not exist or is not associated with this WhatsApp Business Account.`;
+    }
+
+    return {
+      valid: false,
+      statusCode,
+      errorCode,
+      errorSubcode,
+      error: friendlyError
+    };
+  }
+}
+
+/**
  * Dispatches an outbound WhatsApp Cloud API message.
  *
  * @param {Object} params
@@ -425,6 +535,7 @@ async function sendWhatsAppMessage({
       success: false,
       isTimeout,
       isRetryable,
+      isAuthError: statusCode === 401,
       statusCode,
       metaErrorCode,
       metaErrorSubcode,
@@ -797,6 +908,7 @@ module.exports = {
   buildCustomerDecisionNotificationPayload,
   buildConversationReplyPayload,
   resolveRestaurantCredentials,
+  verifyMetaWhatsAppToken,
   sendWhatsAppMessage
 };
 

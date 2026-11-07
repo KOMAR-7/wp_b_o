@@ -271,8 +271,8 @@ async function runStage5OutboxTests() {
 
       const buttons = payload.interactive.action.buttons;
       assert(buttons.length === 2, 'Interactive message provides 2 action buttons');
-      assert(buttons[0].reply.id === 'OWNER_ACCEPT:test-order-uuid-1234', 'Accept button id embeds order.id');
-      assert(buttons[1].reply.id === 'OWNER_REJECT:test-order-uuid-1234', 'Reject button id embeds order.id');
+      assert(buttons[0].reply.id.startsWith('OWNER_ACCEPT:test-order-uuid-1234'), 'Accept button id embeds order.id');
+      assert(buttons[1].reply.id.startsWith('OWNER_REJECT:test-order-uuid-1234'), 'Reject button id embeds order.id');
 
       // Crucial security invariant: never expose customer confirmation token
       assert(!JSON.stringify(payload).includes('conf_'), 'Zero internal confirmation tokens exposed in owner notification');

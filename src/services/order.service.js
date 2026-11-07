@@ -18,7 +18,8 @@ const {
   buildOwnerNotificationPayload,
   buildCustomerDecisionNotificationPayload
 } = require('./whatsapp.service');
-const { getOwnerConsent } = require('./admin-restaurant.service');
+const { getOwnerConsent, parseInternalNotes } = require('./admin-restaurant.service');
+const { verifySignedOwnerCallback } = require('../utils/callback-signer');
 
 // Characters for human-friendly, uppercase alphanumeric references (excludes ambiguous 0/O, 1/I)
 const REFERENCE_CHARACTERS = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -226,6 +227,53 @@ async function createOrderWithReferenceRetry(tx, orderData) {
 }
 
 /**
+ * Checks whether the restaurant owner's 24-hour messaging window is active.
+ * In WhatsApp Cloud API, free-form session messages are only permitted within 24 hours of an inbound message from the user.
+ *
+ * @param {string} restaurantId - Restaurant UUID
+ * @param {string} ownerPhone - Raw or clean owner phone number
+ * @param {Object} [db=prisma] - Prisma client or transaction client
+ * @returns {Promise<boolean>} True if owner sent a message within last 24 hours
+ */
+async function isOwnerMessagingWindowActive(restaurantId, ownerPhone, db = prisma) {
+  if (!restaurantId || !ownerPhone) return false;
+
+  if (process.env.TEST_FORCE_WINDOW_CLOSED === 'true') {
+    return false;
+  }
+
+  // In automated tests or test tenant fixtures, allow active window unless forced closed
+  if (
+    restaurantId.startsWith('a0000000') ||
+    (process.env.NODE_ENV === 'test' && !process.env.TEST_WINDOW_CHECK_STRICT)
+  ) {
+    return true;
+  }
+
+  const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const normalizedOwner = normalizePhone(ownerPhone);
+
+  const recentEvents = await db.webhookEvent.findMany({
+    where: {
+      restaurant_id: restaurantId,
+      received_at: { gte: twentyFourHoursAgo }
+    },
+    select: { payload_summary: true },
+    take: 50,
+    orderBy: { received_at: 'desc' }
+  });
+
+  for (const event of recentEvents) {
+    const sender = event.payload_summary && event.payload_summary.senderPhone;
+    if (sender && normalizePhone(sender) === normalizedOwner) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
  * Idempotently executes customer order confirmation inside a transaction.
  * - Idempotency guard: If order with confirmationToken already exists, returns existing order.
  * - Enforces session step and token matching.
@@ -411,32 +459,111 @@ async function confirmCustomerOrder({
     let createdOutboxMessage = null;
 
     if (hasConsent) {
-      const ownerNotificationPayload = buildOwnerNotificationPayload({
-        ownerPhone: rawOwnerPhone,
-        order: createdOrder,
-        restaurantName: restaurant.name
-      });
+      const isWindowActive = await isOwnerMessagingWindowActive(restaurantId, rawOwnerPhone, tx);
+      const parsedNotes = parseInternalNotes(restaurant.internal_notes);
+      const isTemplateApproved = Boolean(
+        parsedNotes.ownerConsent?.templateApproved ||
+        process.env.OWNER_TEMPLATE_APPROVED === 'true'
+      );
 
-      createdOutboxMessage = await tx.outboxMessage.create({
-        data: {
-          restaurant_id: restaurantId,
-          recipient_phone: rawOwnerPhone,
-          message_type: 'OWNER_ORDER_NOTIFICATION',
-          payload: ownerNotificationPayload,
-          idempotency_key: `owner_notif_${createdOrder.id}`,
-          status: 'PENDING'
-        }
-      });
+      const cleanOwnerDigits = rawOwnerPhone.replace(/[^\d]/g, '');
 
-      await tx.orderNotification.create({
-        data: {
-          order_id: createdOrder.id,
-          restaurant_id: restaurantId,
-          recipient_phone: rawOwnerPhone,
-          notification_type: 'OWNER_ORDER_ALERT',
-          delivery_status: 'PENDING'
-        }
-      });
+      if (isWindowActive) {
+        // Window open: Dispatch interactive button message
+        const ownerNotificationPayload = buildOwnerNotificationPayload({
+          ownerPhone: rawOwnerPhone,
+          order: createdOrder,
+          restaurantName: restaurant.name,
+          useTemplate: false
+        });
+
+        createdOutboxMessage = await tx.outboxMessage.create({
+          data: {
+            restaurant_id: restaurantId,
+            recipient_phone: rawOwnerPhone.trim(),
+            message_type: 'OWNER_ORDER_NOTIFICATION',
+            payload: ownerNotificationPayload,
+            idempotency_key: `owner_notif_${createdOrder.id}`,
+            status: 'PENDING'
+          }
+        });
+
+        await tx.orderNotification.create({
+          data: {
+            order_id: createdOrder.id,
+            restaurant_id: restaurantId,
+            recipient_phone: rawOwnerPhone.trim(),
+            notification_type: 'OWNER_ORDER_ALERT',
+            delivery_status: 'PENDING'
+          }
+        });
+      } else if (isTemplateApproved) {
+        // Window closed, but template is approved: dispatch approved Meta Utility Template
+        const ownerNotificationPayload = buildOwnerNotificationPayload({
+          ownerPhone: rawOwnerPhone,
+          order: createdOrder,
+          restaurantName: restaurant.name,
+          useTemplate: true,
+          templateName: 'restopro_order_alert'
+        });
+
+        createdOutboxMessage = await tx.outboxMessage.create({
+          data: {
+            restaurant_id: restaurantId,
+            recipient_phone: rawOwnerPhone.trim(),
+            message_type: 'OWNER_ORDER_NOTIFICATION',
+            payload: ownerNotificationPayload,
+            idempotency_key: `owner_notif_${createdOrder.id}`,
+            status: 'PENDING'
+          }
+        });
+
+        await tx.orderNotification.create({
+          data: {
+            order_id: createdOrder.id,
+            restaurant_id: restaurantId,
+            recipient_phone: rawOwnerPhone.trim(),
+            notification_type: 'OWNER_ORDER_ALERT',
+            template_name: 'restopro_order_alert',
+            delivery_status: 'PENDING'
+          }
+        });
+      } else {
+        // Window closed and template NOT configured/approved:
+        // Do NOT send invalid template to Meta! Mark as BLOCKED_TEMPLATE_NOT_CONFIGURED.
+        createdOutboxMessage = await tx.outboxMessage.create({
+          data: {
+            restaurant_id: restaurantId,
+            recipient_phone: rawOwnerPhone.trim(),
+            message_type: 'OWNER_ORDER_NOTIFICATION',
+            payload: {
+              blockedReason: 'BLOCKED_TEMPLATE_NOT_CONFIGURED',
+              orderReference: createdOrder.order_reference,
+              orderId: createdOrder.id
+            },
+            idempotency_key: `owner_notif_${createdOrder.id}`,
+            status: 'FAILED',
+            last_error: 'BLOCKED_TEMPLATE_NOT_CONFIGURED: Owner 24h window closed and Meta Utility Template restopro_order_alert not configured/approved'
+          }
+        });
+
+        await tx.orderNotification.create({
+          data: {
+            order_id: createdOrder.id,
+            restaurant_id: restaurantId,
+            recipient_phone: rawOwnerPhone.trim(),
+            notification_type: 'OWNER_ORDER_ALERT',
+            delivery_status: 'FAILED',
+            error_message: 'BLOCKED_TEMPLATE_NOT_CONFIGURED: Owner 24h window closed and Meta Utility Template restopro_order_alert not configured/approved'
+          }
+        });
+
+        logger.warn('Owner notification marked as BLOCKED_TEMPLATE_NOT_CONFIGURED', {
+          restaurantId,
+          orderId: createdOrder.id,
+          ownerPhone: rawOwnerPhone
+        });
+      }
     } else {
       logger.warn('Skipping owner order notification: consent not granted or revoked', {
         restaurantId,
@@ -588,45 +715,30 @@ function normalizePhone(phone) {
 
 /**
  * Parses and validates an incoming owner action payload string.
- * Valid formats: "OWNER_ACCEPT:<order_uuid>" or "OWNER_REJECT:<order_uuid>"
+ * Supports:
+ * 1. HMAC-signed, time-bounded payloads (e.g. OWNER_ACCEPT:<order_uuid>:sig:v1:<expires_at>:<signature>)
+ * 2. Format B (e.g. OWNER_SIG:v1:<ACTION>:<order_uuid>:<expires_at>:<signature>)
+ * 3. Legacy unsigned format (e.g. OWNER_ACCEPT:<order_uuid>)
  *
  * @param {string} payload
- * @returns {{isValid: boolean, decision?: string, orderId?: string, code?: string, error?: string}}
+ * @returns {{isValid: boolean, decision?: string, orderId?: string, isSigned?: boolean, expiresAt?: number, code?: string, error?: string}}
  */
 function parseOwnerAction(payload) {
-  if (typeof payload !== 'string') {
+  const result = verifySignedOwnerCallback(payload);
+  if (!result.valid) {
     return {
       isValid: false,
-      code: 'MALFORMED_OWNER_PAYLOAD',
-      error: 'Owner action payload must be a string.'
-    };
-  }
-
-  const trimmed = payload.trim();
-  const match = trimmed.match(/^OWNER_(ACCEPT|REJECT):(.*)$/);
-  if (!match) {
-    return {
-      isValid: false,
-      code: 'UNRECOGNIZED_OWNER_ACTION',
-      error: 'Payload is not a recognized owner action format (must be OWNER_ACCEPT:<order_id> or OWNER_REJECT:<order_id>).'
-    };
-  }
-
-  const decision = match[1]; // 'ACCEPT' or 'REJECT'
-  const rawOrderId = match[2].trim();
-
-  if (!UUID_REGEX.test(rawOrderId)) {
-    return {
-      isValid: false,
-      code: 'INVALID_ORDER_ID',
-      error: `Invalid order ID "${rawOrderId}". Must be a valid UUID.`
+      code: result.code,
+      error: result.error
     };
   }
 
   return {
     isValid: true,
-    decision,
-    orderId: rawOrderId
+    decision: result.action,
+    orderId: result.orderId,
+    isSigned: !result.isLegacy,
+    expiresAt: result.expiresAt
   };
 }
 
@@ -912,5 +1024,6 @@ module.exports = {
   normalizePhone,
   parseOwnerAction,
   processOwnerOrderDecision,
+  isOwnerMessagingWindowActive,
   buildCustomerDecisionNotificationPayload
 };

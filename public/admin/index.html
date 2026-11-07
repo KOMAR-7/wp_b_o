@@ -547,6 +547,14 @@
             <label>Internal Platform Notes</label>
             <textarea name="internal_notes" class="form-control" rows="2" placeholder="SLA notes, agreement details..."></textarea>
           </div>
+
+          <div class="form-group">
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <input type="checkbox" name="owner_consent_verified" id="create-res-consent" value="true">
+              <span><strong>Owner WhatsApp Notification Consent Verified</strong></span>
+            </label>
+            <small class="form-hint">Explicit owner opt-in required to dispatch new order notifications to owner's personal WhatsApp number.</small>
+          </div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-outline" data-close="modal-create-restaurant">Cancel</button>
@@ -718,6 +726,14 @@
           <div class="form-group">
             <label>Internal Notes</label>
             <textarea name="internal_notes" id="edit-res-notes" class="form-control" rows="2"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <input type="checkbox" name="owner_consent_verified" id="edit-res-consent" value="true">
+              <span><strong>Owner WhatsApp Notification Consent Verified</strong></span>
+            </label>
+            <small class="form-hint">Uncheck to revoke consent and suppress owner order alerts.</small>
           </div>
         </div>
         <div class="modal-footer">
