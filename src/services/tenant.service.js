@@ -4,6 +4,7 @@
  */
 const prisma = require('../config/database');
 const logger = require('../utils/logger');
+const { isCentralPhoneNumberId } = require('./central-whatsapp.service');
 
 /**
  * Resolves a restaurant tenant using Meta's incoming recipient phone_number_id.
@@ -91,6 +92,7 @@ async function findTenantAddresses(restaurantId, customerPhone) {
 
 module.exports = {
   resolveTenantByPhoneNumberId,
+  isCentralPhoneNumberId,
   scopeQuery,
   findTenantOrder,
   findTenantSession,

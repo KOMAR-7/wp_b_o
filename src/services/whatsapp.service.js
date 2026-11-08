@@ -59,6 +59,14 @@ function buildOwnerNotificationPayload({
   const acceptCallback = generateSignedOwnerCallback({ orderId: order.id, action: 'ACCEPT' });
   const rejectCallback = generateSignedOwnerCallback({ orderId: order.id, action: 'REJECT' });
 
+  // Validate dynamic button payload length against Meta Cloud API's 128-character limit
+  if (acceptCallback.length > 128) {
+    throw new Error(`[WHATSAPP PAYLOAD ERROR] Accept button payload exceeds Meta limit of 128 characters (${acceptCallback.length} chars).`);
+  }
+  if (rejectCallback.length > 128) {
+    throw new Error(`[WHATSAPP PAYLOAD ERROR] Reject button payload exceeds Meta limit of 128 characters (${rejectCallback.length} chars).`);
+  }
+
   // Items compact summary for template body
   const itemsSummary = items
     .map(item => `${item.quantity || 1}x ${item.productName || item.name || 'Item'}`)
@@ -254,6 +262,107 @@ function buildCustomerDecisionNotificationPayload({ order, decision, restaurantN
       text: {
         preview_url: false,
         body: bodyText
+      }
+    };
+  }
+
+  throw new Error(`[WHATSAPP PAYLOAD ERROR] Invalid decision "${decision}". Must be ACCEPT or REJECT.`);
+}
+
+/**
+ * Builds Meta Utility Template payload for customer order decision notifications from Central WhatsApp (XYZ).
+ * Respects Meta's 24-hour customer service window by using approved templates:
+ * - restopro_customer_order_accepted
+ * - restopro_customer_order_rejected
+ *
+ * @param {Object} params
+ * @param {Object} params.order - Persisted order record
+ * @param {'ACCEPT'|'REJECT'} params.decision - Decision action
+ * @param {string} [params.restaurantName=''] - Commercial restaurant name
+ * @param {string} [params.templateName] - Optional custom approved template name
+ * @param {string} [params.rejectionReason] - Optional reason for rejection
+ * @returns {Object} Meta Cloud API template payload
+ */
+function buildCentralCustomerDecisionPayload({
+  order,
+  decision,
+  restaurantName = '',
+  templateName = null,
+  rejectionReason = null
+}) {
+  if (!order || typeof order !== 'object') {
+    throw new Error('[WHATSAPP PAYLOAD ERROR] Missing valid order object.');
+  }
+
+  if (!order.customer_phone || typeof order.customer_phone !== 'string') {
+    throw new Error('[WHATSAPP PAYLOAD ERROR] Missing customer_phone in order.');
+  }
+
+  if (!order.order_reference) {
+    throw new Error('[WHATSAPP PAYLOAD ERROR] Missing order_reference in order.');
+  }
+
+  const cleanPhone = order.customer_phone.replace(/[^\d]/g, '').trim();
+  if (!cleanPhone) {
+    throw new Error('[WHATSAPP PAYLOAD ERROR] Invalid customer_phone in order.');
+  }
+
+  const rName = (restaurantName || '').trim() || 'Restaurant';
+  const orderRef = `#${order.order_reference}`;
+  const isDelivery = order.order_type === 'DELIVERY';
+  const fulfilmentText = isDelivery ? 'Delivery' : 'Takeaway (Self-Pickup)';
+  const currencySymbol = order.currency === 'INR' ? '₹' : `${order.currency || 'INR'} `;
+
+  const total = typeof order.total_amount === 'object' && order.total_amount !== null
+    ? Number(order.total_amount).toFixed(2)
+    : Number(order.total_amount || 0).toFixed(2);
+
+  if (decision === 'ACCEPT') {
+    const tName = templateName || 'restopro_customer_order_accepted';
+    return {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: cleanPhone,
+      type: 'template',
+      template: {
+        name: tName,
+        language: { code: 'en' },
+        components: [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: rName },
+              { type: 'text', text: orderRef },
+              { type: 'text', text: fulfilmentText },
+              { type: 'text', text: `${currencySymbol}${total}` }
+            ]
+          }
+        ]
+      }
+    };
+  }
+
+  if (decision === 'REJECT') {
+    const tName = templateName || 'restopro_customer_order_rejected';
+    const reasonText = rejectionReason || 'The restaurant is currently experiencing high demand and cannot accept new orders.';
+    return {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: cleanPhone,
+      type: 'template',
+      template: {
+        name: tName,
+        language: { code: 'en' },
+        components: [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: rName },
+              { type: 'text', text: orderRef },
+              { type: 'text', text: reasonText }
+            ]
+          }
+        ]
       }
     };
   }
@@ -630,7 +739,7 @@ function buildConversationReplyPayload({ action, recipientPhone, restaurantName 
     }
 
     case 'PROMPT_LOCATION_REQUEST': {
-      const bodyText = action.message || 'Please tap the button below to share your delivery location pin 📍';
+      const bodyText = action.message || 'Please share your current delivery location.';
       return {
         messaging_product: 'whatsapp',
         recipient_type: 'individual',
@@ -642,6 +751,24 @@ function buildConversationReplyPayload({ action, recipientPhone, restaurantName 
           action: {
             name: 'send_location'
           }
+        }
+      };
+    }
+
+    case 'PROMPT_LOCATION_DETAILS':
+    case 'PROMPT_MANUAL_ROOM':
+    case 'PROMPT_MANUAL_BUILDING':
+    case 'PROMPT_MANUAL_STREET':
+    case 'PROMPT_MANUAL_AREA':
+    case 'PROMPT_TEXT_INPUT': {
+      return {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: cleanPhone,
+        type: 'text',
+        text: {
+          preview_url: false,
+          body: clampBody(action.message || 'Please provide your address details:')
         }
       };
     }
@@ -906,6 +1033,7 @@ module.exports = {
   DEFAULT_TIMEOUT_MS,
   buildOwnerNotificationPayload,
   buildCustomerDecisionNotificationPayload,
+  buildCentralCustomerDecisionPayload,
   buildConversationReplyPayload,
   resolveRestaurantCredentials,
   verifyMetaWhatsAppToken,

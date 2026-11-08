@@ -226,7 +226,7 @@ async function validateSession(token) {
   }
 
   // Check admin status
-  if (!session.admin || !session.admin.is_active || session.admin.role !== 'SUPER_ADMIN') {
+  if (!session.admin || !session.admin.is_active) {
     return null;
   }
 

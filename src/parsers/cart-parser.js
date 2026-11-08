@@ -7,6 +7,8 @@
  * Rejects corrupt or malformed cart data without silent coercion.
  */
 
+const { resolveMenuItemName } = require('../services/catalog.service');
+
 class CartValidationError extends Error {
   constructor(code, message, details = {}) {
     super(message);
@@ -98,9 +100,10 @@ function isPositiveInteger(val) {
  * }
  *
  * @param {Object} rawOrder - Raw `order` object from Meta WhatsApp message
+ * @param {Object} [options={}] - Optional resolution options (restaurantId, internalNotes, menuResolver, strictResolution)
  * @returns {{isValid: boolean, cart?: Object, error?: string, code?: string, details?: Object}}
  */
-function parseAndValidateCart(rawOrder) {
+function parseAndValidateCart(rawOrder, options = {}) {
   if (!rawOrder || typeof rawOrder !== 'object') {
     return {
       isValid: false,
@@ -216,14 +219,58 @@ function parseAndValidateCart(rawOrder) {
     cartSubtotalCents += lineTotalCents;
     totalItemCount += quantity;
 
-    // 7. SKU Display Fallback: Never invent names, fallback to product_retailer_id
-    const displayName = (typeof item.name === 'string' && item.name.trim())
-      ? item.name.trim()
-      : retailerId;
+    // 7. Menu Item Resolution: Resolve genuine menu item name using catalog service
+    let resolvedName = null;
+    let isResolved = false;
+
+    if (typeof options.menuResolver === 'function') {
+      const res = options.menuResolver({
+        restaurantId: options.restaurantId,
+        catalogId,
+        productRetailerId: retailerId,
+        rawItem: item,
+        internalNotes: options.internalNotes
+      });
+      if (res && res.name) {
+        resolvedName = res.name;
+        isResolved = Boolean(res.isResolved);
+      }
+    } else {
+      const res = resolveMenuItemName({
+        restaurantId: options.restaurantId,
+        catalogId,
+        productRetailerId: retailerId,
+        rawItem: item,
+        internalNotes: options.internalNotes
+      });
+      if (res && res.name) {
+        resolvedName = res.name;
+        isResolved = Boolean(res.isResolved);
+      }
+    }
+
+    if (!resolvedName) {
+      const candidatePayloadName = item.name || item.title || item.product_name || item.productName;
+      if (typeof candidatePayloadName === 'string' && candidatePayloadName.trim() && candidatePayloadName.trim() !== retailerId) {
+        resolvedName = candidatePayloadName.trim();
+        isResolved = true;
+      }
+    }
+
+    if (!isResolved && options.strictResolution) {
+      return {
+        isValid: false,
+        code: 'UNRESOLVED_CATALOG_ITEM',
+        error: `Could not resolve menu item name for catalogue ID "${retailerId}". Unmatched catalogue items are rejected.`
+      };
+    }
+
+    const displayName = resolvedName || (typeof item.name === 'string' && item.name.trim()) || retailerId;
 
     normalizedItems.push({
       productRetailerId: retailerId,
       productName: displayName,
+      isResolved,
       quantity,
       unitPrice: fromIntegerCents(unitPriceCents),
       currency: currencyStr,

@@ -86,8 +86,16 @@ async function processIncomingCart(restaurantId, customerPhone, rawOrderPayload,
     throw new Error('[SESSION ERROR] processIncomingCart requires valid customerPhone');
   }
 
-  // 1. Defensively validate and normalize the incoming cart payload
-  const validation = parseAndValidateCart(rawOrderPayload);
+  // 1. Defensively validate and normalize the incoming cart payload with catalogue resolution
+  const restaurant = await prisma.restaurant.findUnique({
+    where: { id: restaurantId },
+    select: { internal_notes: true, name: true }
+  });
+
+  const validation = parseAndValidateCart(rawOrderPayload, {
+    restaurantId,
+    internalNotes: restaurant?.internal_notes
+  });
   if (!validation.isValid) {
     logger.warn('Cart validation rejected incoming catalogue payload', {
       restaurantId,
@@ -233,6 +241,11 @@ function validateActionForStep(currentStep, buttonId, listId, state) {
       'AWAITING_ADDRESS_CHOICE',
       'AWAITING_ADDRESS_INPUT',
       'AWAITING_LOCATION',
+      'AWAITING_LOCATION_DETAILS',
+      'AWAITING_MANUAL_ROOM',
+      'AWAITING_MANUAL_BUILDING',
+      'AWAITING_MANUAL_STREET',
+      'AWAITING_MANUAL_AREA',
       'AWAITING_SAVE_CONSENT',
       'AWAITING_ORDER_TYPE',
       'AWAITING_CONFIRMATION',
@@ -257,12 +270,23 @@ function validateActionForStep(currentStep, buttonId, listId, state) {
       case 'AWAITING_LOCATION':
         return buttonId === 'BTN_ENTER_MANUAL_ADDRESS';
 
+      case 'AWAITING_LOCATION_DETAILS':
+      case 'AWAITING_MANUAL_ROOM':
+      case 'AWAITING_MANUAL_BUILDING':
+      case 'AWAITING_MANUAL_STREET':
+      case 'AWAITING_MANUAL_AREA':
+        return buttonId === 'BTN_CANCEL_ORDER';
+
       case 'AWAITING_SAVE_CONSENT':
         return (
           buttonId === 'BTN_CONSENT_YES' ||
           buttonId === 'BTN_CONSENT_NO' ||
           buttonId === 'BTN_SAVE_ADDRESS' ||
-          buttonId === 'BTN_USE_ONCE'
+          buttonId === 'BTN_USE_ONCE' ||
+          buttonId === 'BTN_SAVE_YES' ||
+          buttonId === 'BTN_SAVE_NO' ||
+          buttonId === 'BTN_YES' ||
+          buttonId === 'BTN_NO'
         );
 
       case 'AWAITING_ORDER_TYPE':
@@ -630,18 +654,13 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
             action: {
               type: 'PROMPT_LOCATION_REQUEST',
               nextStep,
-              message: 'Please tap the button below to share your delivery location pin 📍'
+              message: 'Please share your current delivery location.'
             }
           };
         }
 
-        // Manual text address prompt
-        if (
-          buttonId === 'BTN_ENTER_MANUAL_ADDRESS' ||
-          listId === 'BTN_ENTER_MANUAL_ADDRESS' ||
-          buttonId === 'BTN_ENTER_NEW_ADDRESS' ||
-          listId === 'BTN_ENTER_NEW_ADDRESS'
-        ) {
+        // Customer with saved addresses requests to enter a new address -> show collection options
+        if (buttonId === 'BTN_ENTER_NEW_ADDRESS' || listId === 'BTN_ENTER_NEW_ADDRESS') {
           const nextStep = 'AWAITING_ADDRESS_INPUT';
           const updatedSession = await tx.conversationSession.update({
             where: { id: session.id },
@@ -658,7 +677,30 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
             action: {
               type: 'PROMPT_ADDRESS_INPUT',
               nextStep,
-              message: 'Please type your complete delivery address (street, building, landmark, city) in one message:'
+              message: 'Please choose to share your location or enter your address manually:'
+            }
+          };
+        }
+
+        // Manual sequential address flow (Step 1: Room Number)
+        if (buttonId === 'BTN_ENTER_MANUAL_ADDRESS' || listId === 'BTN_ENTER_MANUAL_ADDRESS') {
+          const nextStep = 'AWAITING_MANUAL_ROOM';
+          const updatedSession = await tx.conversationSession.update({
+            where: { id: session.id },
+            data: {
+              current_step: nextStep,
+              state: { ...currentState, manualAddress: {}, unsupportedCount: 0 },
+              expires_at: expiresAt
+            }
+          });
+
+          return {
+            success: true,
+            session: updatedSession,
+            action: {
+              type: 'PROMPT_MANUAL_ROOM',
+              nextStep,
+              message: 'Please enter your Room / Flat / House Number:'
             }
           };
         }
@@ -743,12 +785,12 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
       // If in AWAITING_LOCATION and user taps Enter Manually
       if (currentStep === 'AWAITING_LOCATION') {
         if (buttonId === 'BTN_ENTER_MANUAL_ADDRESS' || listId === 'BTN_ENTER_MANUAL_ADDRESS') {
-          const nextStep = 'AWAITING_ADDRESS_INPUT';
+          const nextStep = 'AWAITING_MANUAL_ROOM';
           const updatedSession = await tx.conversationSession.update({
             where: { id: session.id },
             data: {
               current_step: nextStep,
-              state: { ...currentState, unsupportedCount: 0 },
+              state: { ...currentState, manualAddress: {}, unsupportedCount: 0 },
               expires_at: expiresAt
             }
           });
@@ -757,9 +799,9 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
             success: true,
             session: updatedSession,
             action: {
-              type: 'PROMPT_ADDRESS_INPUT',
+              type: 'PROMPT_MANUAL_ROOM',
               nextStep,
-              message: 'Please type your complete delivery address (street, building, landmark, city) in one message:'
+              message: 'Please enter your Room / Flat / House Number:'
             }
           };
         }
@@ -769,7 +811,12 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
       // 2. STATE: AWAITING_SAVE_CONSENT (Interactive Action Handler)
       // -------------------------------------------------------------
       if (currentStep === 'AWAITING_SAVE_CONSENT') {
-        if (buttonId === 'BTN_CONSENT_YES' || buttonId === 'BTN_SAVE_ADDRESS') {
+        if (
+          buttonId === 'BTN_CONSENT_YES' ||
+          buttonId === 'BTN_SAVE_ADDRESS' ||
+          buttonId === 'BTN_SAVE_YES' ||
+          buttonId === 'BTN_YES'
+        ) {
           let savedRecord = null;
           let isDuplicate = false;
 
@@ -815,7 +862,12 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
           };
         }
 
-        if (buttonId === 'BTN_CONSENT_NO' || buttonId === 'BTN_USE_ONCE') {
+        if (
+          buttonId === 'BTN_CONSENT_NO' ||
+          buttonId === 'BTN_USE_ONCE' ||
+          buttonId === 'BTN_SAVE_NO' ||
+          buttonId === 'BTN_NO'
+        ) {
           const nextStep = 'AWAITING_ORDER_TYPE';
           const updatedState = {
             ...currentState,
@@ -1112,21 +1164,27 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
       // 1. WhatsApp Location Pin
       if (event.messageType === 'location') {
         const rawLoc = event.location || {};
+
+        // 1a. Reject Live Location Tracking Updates
+        if (rawLoc.isLive) {
+          const currentUnsupported = (typeof currentState.unsupportedCount === 'number')
+            ? currentState.unsupportedCount
+            : 0;
+          return {
+            success: true,
+            session,
+            action: {
+              type: 'CONTEXTUAL_REPROMPT',
+              currentStep,
+              repromptCount: currentUnsupported,
+              message: 'Live location tracking is not supported. Please share your current delivery location as a static pin.'
+            }
+          };
+        }
+
         const coordCheck = validateCoordinates(rawLoc.latitude, rawLoc.longitude);
 
         if (coordCheck.isValid) {
-          const addrParts = [rawLoc.name, rawLoc.address].filter(Boolean);
-          const locationAddressText = addrParts.length > 0
-            ? addrParts.join(', ')
-            : `Pinned Location (${coordCheck.latitude.toFixed(4)}, ${coordCheck.longitude.toFixed(4)})`;
-
-          const normalized = normalizeAddress({
-            source: 'LOCATION_PIN',
-            addressText: locationAddressText,
-            latitude: coordCheck.latitude,
-            longitude: coordCheck.longitude
-          });
-
           const tempLocation = {
             latitude: coordCheck.latitude,
             longitude: coordCheck.longitude,
@@ -1134,14 +1192,13 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
             address: rawLoc.address || null
           };
 
-          const nextStep = 'AWAITING_SAVE_CONSENT';
+          const nextStep = 'AWAITING_LOCATION_DETAILS';
           const updatedSession = await tx.conversationSession.update({
             where: { id: session.id },
             data: {
               current_step: nextStep,
               state: {
                 ...currentState,
-                address: normalized,
                 tempLocation,
                 unsupportedCount: 0
               },
@@ -1153,10 +1210,10 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
             success: true,
             session: updatedSession,
             action: {
-              type: 'PROMPT_SAVE_CONSENT',
+              type: 'PROMPT_LOCATION_DETAILS',
               nextStep,
-              address: normalized,
-              message: `Address received! 📍\n\n${normalized.addressText}\n\nWould you like to save this address for future orders?`
+              tempLocation,
+              message: 'Please share your room/flat number and building name.'
             }
           };
         }
@@ -1265,6 +1322,390 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
           };
         }
 
+        return {
+          success: true,
+          session,
+          action: {
+            type: 'SILENT_FALLBACK',
+            currentStep,
+            repromptCount: currentUnsupported,
+            message: 'Maximum consecutive reminders reached. Going quiet.'
+          }
+        };
+      }
+    }
+
+    // -------------------------------------------------------------
+    // STATE: AWAITING_LOCATION_DETAILS (Room & Building for Static Pin)
+    // -------------------------------------------------------------
+    if (currentStep === 'AWAITING_LOCATION_DETAILS') {
+      if (event.messageType === 'location') {
+        const rawLoc = event.location || {};
+        if (rawLoc.isLive) {
+          return {
+            success: true,
+            session,
+            action: {
+              type: 'CONTEXTUAL_REPROMPT',
+              currentStep,
+              message: 'Live location tracking is not supported. Please share your current delivery location as a static pin.'
+            }
+          };
+        }
+        const coordCheck = validateCoordinates(rawLoc.latitude, rawLoc.longitude);
+        if (coordCheck.isValid) {
+          const tempLocation = {
+            latitude: coordCheck.latitude,
+            longitude: coordCheck.longitude,
+            name: rawLoc.name || null,
+            address: rawLoc.address || null
+          };
+          const updatedSession = await tx.conversationSession.update({
+            where: { id: session.id },
+            data: {
+              state: { ...currentState, tempLocation, unsupportedCount: 0 },
+              expires_at: expiresAt
+            }
+          });
+          return {
+            success: true,
+            session: updatedSession,
+            action: {
+              type: 'PROMPT_LOCATION_DETAILS',
+              nextStep: 'AWAITING_LOCATION_DETAILS',
+              tempLocation,
+              message: 'Please share your room/flat number and building name.'
+            }
+          };
+        }
+      }
+
+      if (event.messageType === 'text' || textBody.length > 0) {
+        const details = textBody.trim();
+        if (details.length >= 1) {
+          const tempLoc = currentState.tempLocation || {};
+          const lat = typeof tempLoc.latitude === 'number' ? tempLoc.latitude : null;
+          const lng = typeof tempLoc.longitude === 'number' ? tempLoc.longitude : null;
+          const extraArea = [tempLoc.name, tempLoc.address].filter(Boolean).join(', ');
+          const formattedAddress = extraArea ? `${details}, ${extraArea}` : details;
+
+          const normalized = normalizeAddress({
+            source: 'LOCATION_PIN',
+            addressText: formattedAddress,
+            roomAndBuilding: details,
+            latitude: lat,
+            longitude: lng
+          });
+
+          const nextStep = 'AWAITING_SAVE_CONSENT';
+          const { tempLocation: _t, ...stateWithoutTemp } = currentState;
+          const updatedState = {
+            ...stateWithoutTemp,
+            address: normalized,
+            unsupportedCount: 0
+          };
+
+          const updatedSession = await tx.conversationSession.update({
+            where: { id: session.id },
+            data: {
+              current_step: nextStep,
+              state: updatedState,
+              expires_at: expiresAt
+            }
+          });
+
+          return {
+            success: true,
+            session: updatedSession,
+            action: {
+              type: 'PROMPT_SAVE_CONSENT',
+              nextStep,
+              address: normalized,
+              message: `Address received! 📍\n\n${normalized.addressText}\n\nWould you like us to save this delivery address for your future orders?`
+            }
+          };
+        }
+
+        const currentUnsupported = (typeof currentState.unsupportedCount === 'number')
+          ? currentState.unsupportedCount
+          : 0;
+
+        if (currentUnsupported < MAX_CONSECUTIVE_REMINDERS) {
+          const newCount = currentUnsupported + 1;
+          const updatedSession = await tx.conversationSession.update({
+            where: { id: session.id },
+            data: {
+              state: { ...currentState, unsupportedCount: newCount },
+              expires_at: expiresAt
+            }
+          });
+
+          return {
+            success: true,
+            session: updatedSession,
+            action: {
+              type: 'CONTEXTUAL_REPROMPT',
+              currentStep,
+              repromptCount: newCount,
+              message: 'Please share your room/flat number and building name.'
+            }
+          };
+        }
+
+        return {
+          success: true,
+          session,
+          action: {
+            type: 'SILENT_FALLBACK',
+            currentStep,
+            repromptCount: currentUnsupported,
+            message: 'Maximum consecutive reminders reached. Going quiet.'
+          }
+        };
+      }
+    }
+
+    // -------------------------------------------------------------
+    // STATES: 4-Step Sequential Manual Address Collection
+    // 1. Room/Flat -> 2. Building -> 3. Street -> 4. Area
+    // -------------------------------------------------------------
+    if (currentStep === 'AWAITING_MANUAL_ROOM') {
+      if (event.messageType === 'text' || textBody.length > 0) {
+        const room = textBody.trim();
+        if (room.length >= 1) {
+          const nextStep = 'AWAITING_MANUAL_BUILDING';
+          const updatedState = {
+            ...currentState,
+            manualAddress: { ...(currentState.manualAddress || {}), room },
+            unsupportedCount: 0
+          };
+          const updatedSession = await tx.conversationSession.update({
+            where: { id: session.id },
+            data: { current_step: nextStep, state: updatedState, expires_at: expiresAt }
+          });
+          return {
+            success: true,
+            session: updatedSession,
+            action: {
+              type: 'PROMPT_MANUAL_BUILDING',
+              nextStep,
+              message: 'Please enter your Building / Apartment Name:'
+            }
+          };
+        }
+
+        const currentUnsupported = (typeof currentState.unsupportedCount === 'number')
+          ? currentState.unsupportedCount
+          : 0;
+        if (currentUnsupported < MAX_CONSECUTIVE_REMINDERS) {
+          const newCount = currentUnsupported + 1;
+          const updatedSession = await tx.conversationSession.update({
+            where: { id: session.id },
+            data: { state: { ...currentState, unsupportedCount: newCount }, expires_at: expiresAt }
+          });
+          return {
+            success: true,
+            session: updatedSession,
+            action: {
+              type: 'CONTEXTUAL_REPROMPT',
+              currentStep,
+              repromptCount: newCount,
+              message: 'Please enter your Room / Flat / House Number:'
+            }
+          };
+        }
+        return {
+          success: true,
+          session,
+          action: {
+            type: 'SILENT_FALLBACK',
+            currentStep,
+            repromptCount: currentUnsupported,
+            message: 'Maximum consecutive reminders reached. Going quiet.'
+          }
+        };
+      }
+    }
+
+    if (currentStep === 'AWAITING_MANUAL_BUILDING') {
+      if (event.messageType === 'text' || textBody.length > 0) {
+        const building = textBody.trim();
+        if (building.length >= 1) {
+          const nextStep = 'AWAITING_MANUAL_STREET';
+          const updatedState = {
+            ...currentState,
+            manualAddress: { ...(currentState.manualAddress || {}), building },
+            unsupportedCount: 0
+          };
+          const updatedSession = await tx.conversationSession.update({
+            where: { id: session.id },
+            data: { current_step: nextStep, state: updatedState, expires_at: expiresAt }
+          });
+          return {
+            success: true,
+            session: updatedSession,
+            action: {
+              type: 'PROMPT_MANUAL_STREET',
+              nextStep,
+              message: 'Please enter your Street / Road Name:'
+            }
+          };
+        }
+
+        const currentUnsupported = (typeof currentState.unsupportedCount === 'number')
+          ? currentState.unsupportedCount
+          : 0;
+        if (currentUnsupported < MAX_CONSECUTIVE_REMINDERS) {
+          const newCount = currentUnsupported + 1;
+          const updatedSession = await tx.conversationSession.update({
+            where: { id: session.id },
+            data: { state: { ...currentState, unsupportedCount: newCount }, expires_at: expiresAt }
+          });
+          return {
+            success: true,
+            session: updatedSession,
+            action: {
+              type: 'CONTEXTUAL_REPROMPT',
+              currentStep,
+              repromptCount: newCount,
+              message: 'Please enter your Building / Apartment Name:'
+            }
+          };
+        }
+        return {
+          success: true,
+          session,
+          action: {
+            type: 'SILENT_FALLBACK',
+            currentStep,
+            repromptCount: currentUnsupported,
+            message: 'Maximum consecutive reminders reached. Going quiet.'
+          }
+        };
+      }
+    }
+
+    if (currentStep === 'AWAITING_MANUAL_STREET') {
+      if (event.messageType === 'text' || textBody.length > 0) {
+        const street = textBody.trim();
+        if (street.length >= 1) {
+          const nextStep = 'AWAITING_MANUAL_AREA';
+          const updatedState = {
+            ...currentState,
+            manualAddress: { ...(currentState.manualAddress || {}), street },
+            unsupportedCount: 0
+          };
+          const updatedSession = await tx.conversationSession.update({
+            where: { id: session.id },
+            data: { current_step: nextStep, state: updatedState, expires_at: expiresAt }
+          });
+          return {
+            success: true,
+            session: updatedSession,
+            action: {
+              type: 'PROMPT_MANUAL_AREA',
+              nextStep,
+              message: 'Please enter your Area / Locality:'
+            }
+          };
+        }
+
+        const currentUnsupported = (typeof currentState.unsupportedCount === 'number')
+          ? currentState.unsupportedCount
+          : 0;
+        if (currentUnsupported < MAX_CONSECUTIVE_REMINDERS) {
+          const newCount = currentUnsupported + 1;
+          const updatedSession = await tx.conversationSession.update({
+            where: { id: session.id },
+            data: { state: { ...currentState, unsupportedCount: newCount }, expires_at: expiresAt }
+          });
+          return {
+            success: true,
+            session: updatedSession,
+            action: {
+              type: 'CONTEXTUAL_REPROMPT',
+              currentStep,
+              repromptCount: newCount,
+              message: 'Please enter your Street / Road Name:'
+            }
+          };
+        }
+        return {
+          success: true,
+          session,
+          action: {
+            type: 'SILENT_FALLBACK',
+            currentStep,
+            repromptCount: currentUnsupported,
+            message: 'Maximum consecutive reminders reached. Going quiet.'
+          }
+        };
+      }
+    }
+
+    if (currentStep === 'AWAITING_MANUAL_AREA') {
+      if (event.messageType === 'text' || textBody.length > 0) {
+        const area = textBody.trim();
+        if (area.length >= 1) {
+          const { room = '', building = '', street = '' } = currentState.manualAddress || {};
+          const formattedAddress = [room, building, street, area].filter(Boolean).join(', ');
+
+          const normalized = normalizeAddress({
+            source: 'MANUAL',
+            addressText: formattedAddress,
+            roomNumber: room,
+            buildingName: building,
+            street,
+            area,
+            latitude: null,
+            longitude: null
+          });
+
+          const nextStep = 'AWAITING_SAVE_CONSENT';
+          const { manualAddress: _m, ...stateWithoutManual } = currentState;
+          const updatedState = {
+            ...stateWithoutManual,
+            address: normalized,
+            unsupportedCount: 0
+          };
+
+          const updatedSession = await tx.conversationSession.update({
+            where: { id: session.id },
+            data: { current_step: nextStep, state: updatedState, expires_at: expiresAt }
+          });
+
+          return {
+            success: true,
+            session: updatedSession,
+            action: {
+              type: 'PROMPT_SAVE_CONSENT',
+              nextStep,
+              address: normalized,
+              message: `Address received! 📍\n\n${formattedAddress}\n\nWould you like us to save this delivery address for your future orders?`
+            }
+          };
+        }
+
+        const currentUnsupported = (typeof currentState.unsupportedCount === 'number')
+          ? currentState.unsupportedCount
+          : 0;
+        if (currentUnsupported < MAX_CONSECUTIVE_REMINDERS) {
+          const newCount = currentUnsupported + 1;
+          const updatedSession = await tx.conversationSession.update({
+            where: { id: session.id },
+            data: { state: { ...currentState, unsupportedCount: newCount }, expires_at: expiresAt }
+          });
+          return {
+            success: true,
+            session: updatedSession,
+            action: {
+              type: 'CONTEXTUAL_REPROMPT',
+              currentStep,
+              repromptCount: newCount,
+              message: 'Please enter your Area / Locality:'
+            }
+          };
+        }
         return {
           success: true,
           session,
@@ -1505,7 +1946,17 @@ function getContextualPromptForStep(step) {
     case 'AWAITING_ADDRESS_CHOICE':
       return 'Please select a delivery address option: Saved Address, Share Location, Enter Manually, or Cancel Order.';
     case 'AWAITING_LOCATION':
-      return 'Please tap the button to share your location pin 📍 or choose Enter Manually.';
+      return 'Please share your current delivery location by tapping the button, or choose Enter Manually.';
+    case 'AWAITING_LOCATION_DETAILS':
+      return 'Please share your room/flat number and building name.';
+    case 'AWAITING_MANUAL_ROOM':
+      return 'Please enter your Room / Flat / House Number:';
+    case 'AWAITING_MANUAL_BUILDING':
+      return 'Please enter your Building / Apartment Name:';
+    case 'AWAITING_MANUAL_STREET':
+      return 'Please enter your Street / Road Name:';
+    case 'AWAITING_MANUAL_AREA':
+      return 'Please enter your Area / Locality:';
     case 'AWAITING_ADDRESS_INPUT':
       return 'Please provide your full delivery address (minimum 10 characters) or share your location pin.';
     case 'AWAITING_BUILDING_NAME':
@@ -1513,7 +1964,7 @@ function getContextualPromptForStep(step) {
     case 'AWAITING_ROOM_NUMBER':
       return 'Please share your room, flat, or floor number.';
     case 'AWAITING_SAVE_CONSENT':
-      return 'Would you like to save this address for future orders? Tap Yes or No.';
+      return 'Would you like us to save this delivery address for your future orders? Tap Yes or No.';
     case 'AWAITING_ORDER_TYPE':
       return 'Please select your order type: 🚚 Delivery or 🥡 Takeaway.';
     case 'AWAITING_CONFIRMATION':

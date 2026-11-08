@@ -589,7 +589,7 @@ async function runAuditSuite() {
     const activeToken = step3Session.state.confirmationToken;
     assert(typeof activeToken === 'string' && activeToken.startsWith('conf_'), 'Step 3: Fresh confirmation token generated');
 
-    // Step 4 & 5: Location Pin (preserving 0.0 lat/lng), Building & Room Number Collection
+    // Step 4: Location Pin
     const step4Payload = buildMetaWebhookPayload({
       phoneNumberId: TENANT_A_PHONE_ID,
       senderPhone: e2eCustomer,
@@ -606,6 +606,16 @@ async function runAuditSuite() {
     });
     await sendSignedWebhook(step4Payload);
 
+    // Step 4b: Provide room & building details per R6.3
+    const step4DetailsPayload = buildMetaWebhookPayload({
+      phoneNumberId: TENANT_A_PHONE_ID,
+      senderPhone: e2eCustomer,
+      messageId: `wamid.AUDIT_STEP4B_${Date.now()}`,
+      messageType: 'text',
+      messageObj: { text: { body: 'Flat 402, Sunshine Heights' } }
+    });
+    await sendSignedWebhook(step4DetailsPayload);
+
     const step4Session = await prisma.conversationSession.findUnique({
       where: {
         restaurant_id_customer_phone: {
@@ -614,7 +624,7 @@ async function runAuditSuite() {
         }
       }
     });
-    assert(step4Session.current_step === 'AWAITING_SAVE_CONSENT', 'Step 4: Location pin accepted; session directly at AWAITING_SAVE_CONSENT');
+    assert(step4Session.current_step === 'AWAITING_SAVE_CONSENT', 'Step 4: Location details accepted; session at AWAITING_SAVE_CONSENT');
 
     // Consent to save address
     const step4ConsentPayload = buildMetaWebhookPayload({
@@ -899,8 +909,8 @@ async function runAuditSuite() {
     });
 
     const [claimedWorkerA, claimedWorkerB] = await Promise.all([
-      prisma.$transaction(tx => claimPendingOutboxMessages(tx, { limit: 1, workerId: 'worker_alpha' })),
-      prisma.$transaction(tx => claimPendingOutboxMessages(tx, { limit: 1, workerId: 'worker_beta' }))
+      prisma.$transaction(tx => claimPendingOutboxMessages(tx, { limit: 1, workerId: 'worker_alpha' }), { maxWait: 15000, timeout: 20000 }),
+      prisma.$transaction(tx => claimPendingOutboxMessages(tx, { limit: 1, workerId: 'worker_beta' }), { maxWait: 15000, timeout: 20000 })
     ]);
 
     assert(claimedWorkerA.length === 1 && claimedWorkerB.length === 1, 'Reliability: Both workers claimed 1 message');

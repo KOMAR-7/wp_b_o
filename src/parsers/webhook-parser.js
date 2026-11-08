@@ -200,8 +200,15 @@ function parseMessageDetails(type, message) {
         const lineTotal = Math.round(quantity * unitPrice * 100) / 100;
         calculatedSubtotal += lineTotal;
 
+        const candidateName = (typeof item.name === 'string' && item.name.trim())
+          || (typeof item.title === 'string' && item.title.trim())
+          || (typeof item.product_name === 'string' && item.product_name.trim())
+          || (typeof item.productName === 'string' && item.productName.trim())
+          || null;
+
         return {
           productRetailerId: typeof item.product_retailer_id === 'string' ? item.product_retailer_id : '',
+          name: candidateName,
           quantity,
           unitPrice,
           currency,
@@ -226,12 +233,14 @@ function parseMessageDetails(type, message) {
     case 'location': {
       // Customer GPS or Pinned Location Sharing
       const locObj = message.location || {};
+      const isLive = Boolean(locObj.is_live || message.live_location || locObj.live_period);
       return {
         location: {
           latitude: safeParseCoordinate(locObj.latitude),
           longitude: safeParseCoordinate(locObj.longitude),
           name: typeof locObj.name === 'string' ? locObj.name : null,
-          address: typeof locObj.address === 'string' ? locObj.address : null
+          address: typeof locObj.address === 'string' ? locObj.address : null,
+          isLive
         }
       };
     }

@@ -65,13 +65,52 @@ function adminLoginRateLimiter(req, res, next) {
   next();
 }
 
+// Rate limiting for central connection tests (prevents Meta API exhaustion)
+const connectionTestStore = new Map();
+const CONNECTION_TEST_WINDOW_MS = 60 * 1000; // 1 minute
+const MAX_CONNECTION_TESTS = 15;
+
+/**
+ * Express middleware to enforce connection test rate limiting.
+ */
+function centralConnectionTestRateLimiter(req, res, next) {
+  // In test mode, allow unless specifically testing rate limiter
+  if (process.env.NODE_ENV === 'test' && !process.env.TEST_CENTRAL_RATE_LIMIT) {
+    return next();
+  }
+
+  const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+  const record = connectionTestStore.get(clientIp);
+
+  if (record && now < record.resetAt) {
+    if (record.count >= MAX_CONNECTION_TESTS) {
+      const retryAfterSeconds = Math.ceil((record.resetAt - now) / 1000);
+      logger.warn('Central connection test rate limit exceeded', { clientIp, attempts: record.count });
+      res.setHeader('Retry-After', retryAfterSeconds);
+      return res.status(429).json({
+        success: false,
+        code: 'RATE_LIMIT_EXCEEDED',
+        error: 'Too many connection tests requested. Please wait before testing again.'
+      });
+    }
+    record.count += 1;
+  } else {
+    connectionTestStore.set(clientIp, { count: 1, resetAt: now + CONNECTION_TEST_WINDOW_MS });
+  }
+
+  next();
+}
+
 // Export for testing and management
 function resetRateLimiter() {
   attemptsStore.clear();
+  connectionTestStore.clear();
 }
 
 module.exports = {
   adminLoginRateLimiter,
+  centralConnectionTestRateLimiter,
   resetRateLimiter,
   MAX_ATTEMPTS,
   WINDOW_MS

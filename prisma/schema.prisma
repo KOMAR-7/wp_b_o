@@ -73,6 +73,11 @@ enum PaymentStatus {
   REVERSED
 }
 
+enum SenderChannel {
+  RESTAURANT
+  CENTRAL
+}
+
 model Restaurant {
   id                     String                @id @default(uuid()) @db.Uuid
   name                   String                @db.VarChar(255)
@@ -208,23 +213,25 @@ model OrderNotification {
 }
 
 model OutboxMessage {
-  id              String       @id @default(uuid()) @db.Uuid
-  restaurant_id   String       @db.Uuid
-  recipient_phone String       @db.VarChar(32)
-  message_type    String       @db.VarChar(32)
-  payload         Json         @db.JsonB
-  idempotency_key String       @unique @db.VarChar(128)
-  status          OutboxStatus @default(PENDING)
-  attempts        Int          @default(0)
-  last_error      String?      @db.Text
-  created_at      DateTime     @default(now()) @db.Timestamptz()
-  updated_at      DateTime     @updatedAt @db.Timestamptz()
+  id              String        @id @default(uuid()) @db.Uuid
+  restaurant_id   String        @db.Uuid
+  recipient_phone String        @db.VarChar(32)
+  message_type    String        @db.VarChar(32)
+  payload         Json          @db.JsonB
+  idempotency_key String        @unique @db.VarChar(128)
+  status          OutboxStatus  @default(PENDING)
+  sender_channel  SenderChannel @default(RESTAURANT)
+  attempts        Int           @default(0)
+  last_error      String?       @db.Text
+  created_at      DateTime      @default(now()) @db.Timestamptz()
+  updated_at      DateTime      @updatedAt @db.Timestamptz()
 
-  restaurant      Restaurant   @relation(fields: [restaurant_id], references: [id], onDelete: Cascade)
+  restaurant      Restaurant    @relation(fields: [restaurant_id], references: [id], onDelete: Cascade)
 
   @@index([status, created_at])
   @@index([restaurant_id, status])
   @@index([restaurant_id, created_at])
+  @@index([sender_channel, status])
   @@map("outbox_messages")
 }
 
@@ -330,4 +337,23 @@ model AuditLog {
   @@index([entity_type, entity_id])
   @@index([created_at])
   @@map("audit_logs")
+}
+
+// =============================================================================
+// R6.5: CENTRAL WHATSAPP ARCHITECTURE
+// =============================================================================
+
+model CentralWhatsAppAccount {
+  id                     String    @id @default(uuid()) @db.Uuid
+  phone_number_id        String    @unique @db.VarChar(64)
+  waba_id                String    @db.VarChar(64)
+  display_phone_number   String?   @db.VarChar(32)
+  access_token_encrypted String    @db.Text
+  templates              Json?     @default("{}") @db.JsonB
+  is_active              Boolean   @default(true)
+  created_at             DateTime  @default(now()) @db.Timestamptz()
+  updated_at             DateTime  @updatedAt @db.Timestamptz()
+
+  @@index([is_active])
+  @@map("central_whatsapp_accounts")
 }

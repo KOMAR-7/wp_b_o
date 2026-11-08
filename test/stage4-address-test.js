@@ -417,12 +417,19 @@ async function runStage4AddressTests() {
       };
 
       const pinRes = await handleIncomingMessage(tenantA.id, custPin, pinEvent);
-      assert(pinRes.session.current_step === 'AWAITING_SAVE_CONSENT', 'Location pin transitions directly to AWAITING_SAVE_CONSENT');
-      assert(pinRes.session.state.address.source === 'LOCATION_PIN', 'Address source is LOCATION_PIN');
-      assert(pinRes.session.state.address.latitude === 19.1197, 'Coordinates preserved: latitude');
-      assert(pinRes.session.state.address.longitude === 72.8468, 'Coordinates preserved: longitude');
-      assert(pinRes.session.state.address.addressText.includes('Green Valley') || pinRes.session.state.address.addressText.includes('19.1197'), 'Location address normalized');
-      assert(pinRes.action.type === 'PROMPT_SAVE_CONSENT', 'Action prompts for address saving consent');
+      assert(pinRes.session.current_step === 'AWAITING_LOCATION_DETAILS', 'Location pin transitions to AWAITING_LOCATION_DETAILS');
+      assert(pinRes.action.type === 'PROMPT_LOCATION_DETAILS', 'Action prompts for room and building name');
+
+      const detailsRes = await handleIncomingMessage(tenantA.id, custPin, {
+        messageType: 'text',
+        text: 'Flat 101, Green Valley Heights'
+      });
+      assert(detailsRes.session.current_step === 'AWAITING_SAVE_CONSENT', 'Location details transition to AWAITING_SAVE_CONSENT');
+      assert(detailsRes.session.state.address.source === 'LOCATION_PIN', 'Address source is LOCATION_PIN');
+      assert(detailsRes.session.state.address.latitude === 19.1197, 'Coordinates preserved: latitude');
+      assert(detailsRes.session.state.address.longitude === 72.8468, 'Coordinates preserved: longitude');
+      assert(detailsRes.session.state.address.addressText.includes('Green Valley') || detailsRes.session.state.address.addressText.includes('19.1197'), 'Location address normalized');
+      assert(detailsRes.action.type === 'PROMPT_SAVE_CONSENT', 'Action prompts for address saving consent');
     }
 
     // -------------------------------------------------------------
@@ -524,6 +531,10 @@ async function runStage4AddressTests() {
         messageType: 'location',
         location: { latitude: 12.9716, longitude: 77.5946 }
       });
+      await handleIncomingMessage(tenantA.id, custSec, {
+        messageType: 'text',
+        text: 'Flat 202, Metro Towers'
+      });
 
       const s = await prisma.conversationSession.findUnique({
         where: { id: cartSecRes.session.id }
@@ -549,10 +560,14 @@ async function runStage4AddressTests() {
       const cartRemRes = await processIncomingCart(tenantA.id, custRem, testCartPayload);
       createdSessionIds.push(cartRemRes.session.id);
 
-      // Advance to AWAITING_SAVE_CONSENT via location pin
+      // Advance to AWAITING_SAVE_CONSENT via location pin and details
       await handleIncomingMessage(tenantA.id, custRem, {
         messageType: 'location',
         location: { latitude: 28.6139, longitude: 77.2090 }
+      });
+      await handleIncomingMessage(tenantA.id, custRem, {
+        messageType: 'text',
+        text: 'Flat 303, CP View'
       });
 
       // 1st unsupported message (image)
@@ -636,7 +651,7 @@ async function runStage4AddressTests() {
       const s = await prisma.conversationSession.findUnique({
         where: { restaurant_id_customer_phone: { restaurant_id: tenantA.id, customer_phone: custWh } }
       });
-      assert(s.current_step === 'AWAITING_SAVE_CONSENT', 'Session transitioned to AWAITING_SAVE_CONSENT via webhook HTTP POST');
+      assert(s.current_step === 'AWAITING_LOCATION_DETAILS', 'Session transitioned to AWAITING_LOCATION_DETAILS via webhook HTTP POST');
       createdSessionIds.push(s.id);
     }
 

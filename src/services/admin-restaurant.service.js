@@ -20,33 +20,41 @@ function validateE164Phone(phone) {
 /**
  * Parses internal notes and extracts structured metadata if present.
  * @param {string} internalNotes
- * @returns {{textNotes: string, ownerConsent: Object|null}}
+ * @returns {{textNotes: string, ownerConsent: Object|null, menuCatalog: Object|null}}
  */
 function parseInternalNotes(internalNotes) {
   if (!internalNotes || typeof internalNotes !== 'string') {
-    return { textNotes: '', ownerConsent: null };
+    return { textNotes: '', ownerConsent: null, menuCatalog: null };
   }
   const tagMatch = internalNotes.match(/<!--RESTOPRO_METADATA:(.*?)-->/s);
   if (tagMatch) {
     try {
       const meta = JSON.parse(tagMatch[1]);
       const textNotes = internalNotes.replace(/<!--RESTOPRO_METADATA:.*?-->/s, '').trim();
-      return { textNotes, ownerConsent: meta.ownerConsent || null };
+      return {
+        textNotes,
+        ownerConsent: meta.ownerConsent || null,
+        menuCatalog: meta.menuCatalog || null
+      };
     } catch (_) {}
   }
-  return { textNotes: internalNotes, ownerConsent: null };
+  return { textNotes: internalNotes, ownerConsent: null, menuCatalog: null };
 }
 
 /**
  * Formats internal notes with embedded structured metadata.
  * @param {string} textNotes
  * @param {Object} ownerConsent
+ * @param {Object} [menuCatalog=null]
  * @returns {string}
  */
-function formatInternalNotes(textNotes, ownerConsent) {
+function formatInternalNotes(textNotes, ownerConsent, menuCatalog = null) {
   const cleanText = (textNotes || '').replace(/<!--RESTOPRO_METADATA:.*?-->/s, '').trim();
-  if (!ownerConsent) return cleanText;
-  const metaTag = `<!--RESTOPRO_METADATA:${JSON.stringify({ ownerConsent })}-->`;
+  const metaObj = {};
+  if (ownerConsent) metaObj.ownerConsent = ownerConsent;
+  if (menuCatalog) metaObj.menuCatalog = menuCatalog;
+  if (Object.keys(metaObj).length === 0) return cleanText;
+  const metaTag = `<!--RESTOPRO_METADATA:${JSON.stringify(metaObj)}-->`;
   return cleanText ? `${cleanText}\n\n${metaTag}` : metaTag;
 }
 

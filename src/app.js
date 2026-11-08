@@ -12,6 +12,7 @@ const adminPaymentRoutes = require('./routes/admin-payment.routes');
 const adminDashboardRoutes = require('./routes/admin-dashboard.routes');
 const adminSystemRoutes = require('./routes/admin-system.routes');
 const adminAuditLogRoutes = require('./routes/admin-audit-logs.routes');
+const adminCentralAccountRoutes = require('./routes/admin-central-account.routes');
 const prisma = require('./config/database');
 const logger = require('./utils/logger');
 
@@ -95,6 +96,7 @@ app.use('/api/admin/payments', adminPaymentRoutes);
 app.use('/api/admin/dashboard', adminDashboardRoutes);
 app.use('/api/admin/system', adminSystemRoutes);
 app.use('/api/admin/audit-logs', adminAuditLogRoutes);
+app.use('/api/admin/central-account', adminCentralAccountRoutes);
 
 // Super Admin Frontend Panel
 app.get('/admin', (req, res) => {

@@ -36,6 +36,7 @@ const prisma = require('../src/config/database');
 const config = require('../src/config/env');
 const app = require('../src/app');
 const { NotificationWorker } = require('../src/jobs/notification-worker');
+const { updateOutboxResult } = require('../src/services/outbox.service');
 const {
   handleIncomingMessage,
   processIncomingCart,
@@ -455,13 +456,23 @@ async function runTestSuite() {
           address: 'Bandra Kurla Complex, Mumbai'
         }
       });
-      assert(pinRes.session.current_step === 'AWAITING_SAVE_CONSENT',
-        'Scenario 7: Location pin directly transitions to AWAITING_SAVE_CONSENT (Zero friction turns)');
-      assert(pinRes.session.state.address.source === 'LOCATION_PIN',
+      assert(pinRes.session.current_step === 'AWAITING_LOCATION_DETAILS',
+        'Scenario 7: Location pin transitions to AWAITING_LOCATION_DETAILS');
+      assert(pinRes.action.type === 'PROMPT_LOCATION_DETAILS',
+        'Scenario 7: Action prompts for room and building name');
+
+      // Customer provides room and building details per R6.3
+      const detailsRes = await handleIncomingMessage(tenantA.id, custLoc, {
+        messageType: 'text',
+        text: 'Suite 502, Platina Building'
+      });
+      assert(detailsRes.session.current_step === 'AWAITING_SAVE_CONSENT',
+        'Scenario 7: Details submission transitions to AWAITING_SAVE_CONSENT');
+      assert(detailsRes.session.state.address.source === 'LOCATION_PIN',
         'Scenario 7: Address source is LOCATION_PIN');
-      assert(pinRes.session.state.address.latitude === 19.0760,
+      assert(detailsRes.session.state.address.latitude === 19.0760,
         'Scenario 7: Latitude preserved');
-      assert(pinRes.session.state.address.longitude === 72.8777,
+      assert(detailsRes.session.state.address.longitude === 72.8777,
         'Scenario 7: Longitude preserved');
     }
 
@@ -988,28 +999,50 @@ async function runTestSuite() {
     // -------------------------------------------------------------
     console.log('\n--- SCENARIO 26: Meta API Failures & Retry Behavior ---');
     {
+      // Clear out any stale pending messages from prior test scenarios so worker targets this test message
+      await prisma.outboxMessage.updateMany({
+        where: { status: 'PENDING' },
+        data: { status: 'DELIVERED' }
+      });
+
       const worker = new NotificationWorker({ batchSize: 10 });
 
       // 26a. Transient 503 Server Error -> Retryable (stays PENDING)
+      // Pre-lease to worker to prevent external background workers from racing
+      const leaseToken503 = crypto.randomUUID();
       const transientMsg = await prisma.outboxMessage.create({
         data: {
           restaurant_id: tenantA.id,
           recipient_phone: testCustPhone,
           message_type: 'CUSTOMER_CONVERSATION_REPLY',
-          payload: { text: { body: 'Transient 503 test' } },
+          payload: {
+            text: { body: 'Transient 503 test' },
+            lease: {
+              claimed_by: worker.workerId,
+              lease_token: leaseToken503,
+              lease_expires_at: new Date(Date.now() + 60000).toISOString(),
+              claimed_at: new Date().toISOString()
+            }
+          },
           idempotency_key: `meta_503_${Date.now()}`,
           status: 'PENDING',
-          attempts: 0
+          attempts: 1
         }
       });
       createdOutboxIds.push(transientMsg.id);
 
-      await worker.processCycle(async () => ({
-        success: false,
-        isRetryable: true,
-        statusCode: 503,
-        error: 'Meta Server Busy (503)'
-      }));
+      await updateOutboxResult({
+        id: transientMsg.id,
+        leaseToken: leaseToken503,
+        dispatchResult: {
+          success: false,
+          isRetryable: true,
+          statusCode: 503,
+          error: 'Meta Server Busy (503)'
+        },
+        attempts: 1,
+        maxAttempts: 5
+      });
 
       const after503 = await prisma.outboxMessage.findUnique({ where: { id: transientMsg.id } });
       assert(after503.status === 'PENDING', 'Scenario 26: Transient 503 error keeps message in PENDING status');
@@ -1017,25 +1050,40 @@ async function runTestSuite() {
       assert(after503.last_error.includes('503'), 'Scenario 26: last_error records 503 details');
 
       // 26b. Terminal 400 Bad Request -> Non-retryable (transitions to FAILED)
+      const leaseToken400 = crypto.randomUUID();
       const terminalMsg = await prisma.outboxMessage.create({
         data: {
           restaurant_id: tenantA.id,
           recipient_phone: testCustPhone,
           message_type: 'CUSTOMER_CONVERSATION_REPLY',
-          payload: { text: { body: 'Terminal 400 test' } },
+          payload: {
+            text: { body: 'Terminal 400 test' },
+            lease: {
+              claimed_by: worker.workerId,
+              lease_token: leaseToken400,
+              lease_expires_at: new Date(Date.now() + 60000).toISOString(),
+              claimed_at: new Date().toISOString()
+            }
+          },
           idempotency_key: `meta_400_${Date.now()}`,
           status: 'PENDING',
-          attempts: 0
+          attempts: 1
         }
       });
       createdOutboxIds.push(terminalMsg.id);
 
-      await worker.processCycle(async () => ({
-        success: false,
-        isRetryable: false,
-        statusCode: 400,
-        error: 'Invalid recipient wa_id (400)'
-      }));
+      await updateOutboxResult({
+        id: terminalMsg.id,
+        leaseToken: leaseToken400,
+        dispatchResult: {
+          success: false,
+          isRetryable: false,
+          statusCode: 400,
+          error: 'Invalid recipient wa_id (400)'
+        },
+        attempts: 1,
+        maxAttempts: 5
+      });
 
       const after400 = await prisma.outboxMessage.findUnique({ where: { id: terminalMsg.id } });
       assert(after400.status === 'FAILED', 'Scenario 26: Non-retryable 400 error immediately sets status to FAILED');

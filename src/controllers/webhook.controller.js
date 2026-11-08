@@ -5,7 +5,8 @@
 const { verifyWebhookChallenge } = require('../middleware/verifyWebhook');
 const { parseWebhookPayload } = require('../parsers/webhook-parser');
 const { recordIncomingEvent, markEventCompleted, markEventFailed } = require('../services/webhook.service');
-const { resolveTenantByPhoneNumberId } = require('../services/tenant.service');
+const { resolveTenantByPhoneNumberId, isCentralPhoneNumberId } = require('../services/tenant.service');
+const { handleCentralInformationalMessage } = require('../services/central-whatsapp.service');
 const { handleIncomingMessage } = require('../services/conversation.service');
 const { processOwnerOrderDecision } = require('../services/order.service');
 const { enqueueConversationReply } = require('../services/outbox.service');
@@ -77,6 +78,79 @@ async function handleIncomingEvent(req, res) {
       }
 
       if (event.category === 'INCOMING_MESSAGE') {
+        const isCentral = await isCentralPhoneNumberId(event.phoneNumberId);
+
+        if (isCentral) {
+          logger.info(`Central WhatsApp message received [type: ${event.messageType}]`, {
+            phoneNumberId: event.phoneNumberId,
+            senderPhone: event.senderPhone,
+            senderName: event.senderName,
+            messageId: event.messageId,
+            messageType: event.messageType
+          });
+
+          // Check if message is an owner interactive action (e.g. OWNER_ACCEPT:<id>, OWNER_REJECT:<id>, or signed OWNER_SIG:)
+          const actionPayload = event.interactiveReply?.id || event.buttonReply?.payload || null;
+          if (actionPayload && typeof actionPayload === 'string' && (actionPayload.startsWith('OWNER_') || actionPayload.startsWith('OWNER_SIG:'))) {
+            logger.info('Received owner decision interactive payload on Central WhatsApp number', {
+              phoneNumberId: event.phoneNumberId,
+              senderPhone: event.senderPhone,
+              payload: actionPayload
+            });
+
+            // Process decision without pre-resolving restaurantId (order ID inside verified payload resolves restaurant context)
+            const decisionResult = await processOwnerOrderDecision({
+              senderPhone: event.senderPhone,
+              buttonPayload: actionPayload
+            });
+
+            if (!decisionResult.success) {
+              logger.warn('Owner decision on Central number rejected', {
+                phoneNumberId: event.phoneNumberId,
+                senderPhone: event.senderPhone,
+                code: decisionResult.code,
+                error: decisionResult.error
+              });
+              if (eventRecord) {
+                await markEventFailed(eventRecord.id, `Owner decision rejected: ${decisionResult.error}`);
+              }
+              continue;
+            }
+
+            logger.info('Central owner decision processed successfully', {
+              orderId: decisionResult.order?.id,
+              orderReference: decisionResult.order?.order_reference,
+              restaurantId: decisionResult.order?.restaurant_id,
+              status: decisionResult.order?.status,
+              isDuplicate: decisionResult.isDuplicate || false
+            });
+
+            if (eventRecord) {
+              await markEventCompleted(eventRecord.id);
+            }
+            continue;
+          }
+
+          // Central webhook events must never accidentally enter the restaurant customer conversation engine.
+          // Handle unknown text messages received on XYZ with a safe informational response.
+          logger.info('Non-owner message received on Central WhatsApp number; returning informational response', {
+            phoneNumberId: event.phoneNumberId,
+            senderPhone: event.senderPhone,
+            messageType: event.messageType
+          });
+
+          await handleCentralInformationalMessage({
+            senderPhone: event.senderPhone,
+            messageId: event.messageId
+          });
+
+          if (eventRecord) {
+            await markEventCompleted(eventRecord.id);
+          }
+          continue;
+        }
+
+        // Restaurant-specific webhook flow (Legacy or normal restaurant incoming)
         logger.info(`Incoming WhatsApp message persisted [type: ${event.messageType}]`, {
           phoneNumberId: event.phoneNumberId,
           senderPhone: event.senderPhone,

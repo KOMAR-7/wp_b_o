@@ -14,6 +14,7 @@ const crypto = require('crypto');
 const prisma = require('../config/database');
 const logger = require('../utils/logger');
 const { resolveRestaurantCredentials, sendWhatsAppMessage, buildConversationReplyPayload } = require('./whatsapp.service');
+const { resolveCentralCredentials } = require('./central-whatsapp.service');
 
 const DEFAULT_LEASE_TTL_MS = 60 * 1000; // 60 seconds lease TTL
 const DEFAULT_MAX_ATTEMPTS = 5;
@@ -162,7 +163,7 @@ async function claimPendingOutboxMessages(tx, {
 
   // Raw query using FOR UPDATE SKIP LOCKED for atomic distributed worker claiming
   const claimedRows = await tx.$queryRaw`
-    SELECT id, restaurant_id, recipient_phone, message_type, payload, idempotency_key, status, attempts
+    SELECT id, restaurant_id, recipient_phone, message_type, sender_channel, payload, idempotency_key, status, attempts
     FROM outbox_messages
     WHERE (
       (status = 'PENDING' AND attempts < ${maxAttempts})
@@ -212,6 +213,7 @@ async function claimPendingOutboxMessages(tx, {
       restaurant_id: row.restaurant_id,
       recipient_phone: row.recipient_phone,
       message_type: row.message_type,
+      sender_channel: row.sender_channel || 'RESTAURANT',
       payload: row.payload,
       idempotency_key: row.idempotency_key,
       status: row.status,
@@ -347,6 +349,10 @@ function classifyFailureCategory(dispatchResult, rawError = '') {
   const errStr = (rawError || dispatchResult?.error || '').toLowerCase();
   const statusCode = dispatchResult?.statusCode;
 
+  if (errStr.includes('[central credential error]') || errStr.includes('missing_central_credentials') || errStr.includes('no active central whatsapp account')) {
+    return 'CENTRAL_CREDENTIAL_ERROR';
+  }
+
   if (errStr.includes('[credential error]')) {
     if (errStr.includes('begin with "eaa"') || errStr.includes('invalid whatsapp access token') || errStr.includes('format is invalid')) {
       return 'INVALID_ACCESS_TOKEN_FORMAT';
@@ -432,6 +438,13 @@ async function dispatchPendingOutboxMessages({
     try {
       if (customSender) {
         dispatchResult = await customSender(msg);
+      } else if (msg.sender_channel === 'CENTRAL') {
+        const creds = await resolveCentralCredentials();
+        dispatchResult = await sendWhatsAppMessage({
+          phoneNumberId: creds.phoneNumberId,
+          accessToken: creds.accessToken,
+          payload: msg.payload
+        });
       } else {
         const creds = await resolveRestaurantCredentials(msg.restaurant_id);
         dispatchResult = await sendWhatsAppMessage({
@@ -474,6 +487,7 @@ async function dispatchPendingOutboxMessages({
       logger.warn('Outbox message dispatch failed', {
         outboxId: msg.id,
         restaurantId: msg.restaurant_id,
+        senderChannel: msg.sender_channel,
         messageType: msg.message_type,
         category: failureCategory,
         statusCode: dispatchResult.statusCode || null,

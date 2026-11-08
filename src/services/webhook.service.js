@@ -5,7 +5,7 @@
  */
 const prisma = require('../config/database');
 const logger = require('../utils/logger');
-const { resolveTenantByPhoneNumberId } = require('./tenant.service');
+const { resolveTenantByPhoneNumberId, isCentralPhoneNumberId } = require('./tenant.service');
 const { sanitizeStatusErrors } = require('../parsers/webhook-parser');
 
 /**
@@ -28,12 +28,16 @@ async function recordIncomingEvent(event) {
     return { isDuplicate: false, eventRecord: null };
   }
 
-  // Resolve tenant context if phone_number_id is present
+  // Resolve tenant context if phone_number_id is present (Central webhooks are not restaurant tenants)
   let restaurantId = null;
+  let isCentral = false;
   if (event.phoneNumberId) {
-    const tenant = await resolveTenantByPhoneNumberId(event.phoneNumberId);
-    if (tenant) {
-      restaurantId = tenant.id;
+    isCentral = await isCentralPhoneNumberId(event.phoneNumberId);
+    if (!isCentral) {
+      const tenant = await resolveTenantByPhoneNumberId(event.phoneNumberId);
+      if (tenant) {
+        restaurantId = tenant.id;
+      }
     }
   }
 
@@ -47,6 +51,7 @@ async function recordIncomingEvent(event) {
     senderPhone: event.senderPhone,
     senderName: event.senderName,
     phoneNumberId: event.phoneNumberId,
+    isCentral,
     timestamp: event.timestamp,
     ...(event.text ? { text: event.text } : {}),
     ...(event.order ? { order: event.order } : {}),
