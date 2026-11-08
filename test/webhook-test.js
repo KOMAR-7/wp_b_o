@@ -324,6 +324,55 @@ async function runTests() {
       assert(parsed[0].status === 'delivered', '06-delivery-status-receipt status is delivered');
     }
 
+    // 5.7 Failed Status Webhook with Meta Error Code, Title & Details
+    {
+      const failedPayload = {
+        object: 'whatsapp_business_account',
+        entry: [{
+          id: '100293847561029',
+          changes: [{
+            field: 'messages',
+            value: {
+              messaging_product: 'whatsapp',
+              metadata: {
+                display_phone_number: '15550123456',
+                phone_number_id: '109876543210123'
+              },
+              statuses: [{
+                id: 'wamid.HBgTEST_FAIL_123',
+                status: 'failed',
+                timestamp: '1794131895',
+                recipient_id: '919372015523',
+                errors: [{
+                  code: 131051,
+                  title: 'Message failed to send',
+                  message: 'Template dispatch failed (token EAAtestsecret123)',
+                  error_data: {
+                    details: 'Template hydration error: parameter count mismatch with token EAAsecrettoken'
+                  },
+                  href: 'https://developers.facebook.com/docs/whatsapp/cloud-api/support/error-codes'
+                }]
+              }]
+            }
+          }]
+        }]
+      };
+
+      const parsed = parseWebhookPayload(failedPayload);
+      assert(parsed.length === 1, 'Failed status payload parses exactly 1 event');
+      assert(parsed[0].category === 'STATUS_RECEIPT', 'Category is STATUS_RECEIPT');
+      assert(parsed[0].status === 'failed', 'Status is failed');
+      assert(parsed[0].recipientId === '919372015523', 'Recipient ID extracted');
+      assert(Array.isArray(parsed[0].errors) && parsed[0].errors.length === 1, 'Errors extracted as array');
+      assert(parsed[0].errors[0].code === 131051, 'Meta error code 131051 extracted');
+      assert(parsed[0].errors[0].title === 'Message failed to send', 'Error title extracted');
+      assert(parsed[0].errors[0].details.includes('parameter count mismatch'), 'Error details extracted from error_data.details');
+      assert(parsed[0].errors[0].message.includes('[REDACTED_TOKEN]'), 'Access tokens in message are safely redacted');
+      assert(!parsed[0].errors[0].message.includes('EAAtestsecret123'), 'Raw token not leaked in message');
+      assert(parsed[0].errors[0].details.includes('[REDACTED_TOKEN]'), 'Access tokens in details are safely redacted');
+      assert(!parsed[0].errors[0].details.includes('EAAsecrettoken'), 'Raw token not leaked in details');
+    }
+
     // -------------------------------------------------------------
     // TEST GROUP 6: Complex Multi-Entry, Multi-Change & Multi-Message Payloads
     // -------------------------------------------------------------

@@ -594,6 +594,37 @@ async function runStage2Tests() {
         phoneNumberId: '111111111111111'
       });
       assert(resReadDupe.isDuplicate === true, 'Repeat of status "read" is correctly flagged as duplicate');
+
+      // Status 4: failed with Meta error code and details
+      const failWamid = `wamid.FAIL_${Date.now()}`;
+      const resFailed = await recordIncomingEvent({
+        category: 'STATUS_RECEIPT',
+        messageId: failWamid,
+        status: 'failed',
+        recipientId: '919372015523',
+        phoneNumberId: '111111111111111',
+        errors: [{
+          code: 131051,
+          title: 'Message failed to send',
+          message: 'Template dispatch rejected by Meta',
+          error_data: {
+            details: 'Template restopro_order_alert parameter count mismatch'
+          }
+        }]
+      });
+      assert(resFailed.isDuplicate === false, 'Status "failed" is persisted to database');
+
+      // Verify exact fields persisted in PostgreSQL payload_summary
+      const savedFailEvent = await prisma.webhookEvent.findUnique({
+        where: { event_key: `status:${failWamid}:failed` }
+      });
+      assert(savedFailEvent !== null, 'Failed status record exists in PostgreSQL');
+      assert(savedFailEvent.payload_summary.status === 'failed', 'Status "failed" stored in payload_summary');
+      assert(savedFailEvent.payload_summary.recipientId === '919372015523', 'Recipient ID stored in payload_summary');
+      assert(Array.isArray(savedFailEvent.payload_summary.errors), 'Errors array stored in payload_summary');
+      assert(savedFailEvent.payload_summary.errors[0].code === 131051, 'Meta error code 131051 persisted');
+      assert(savedFailEvent.payload_summary.errors[0].title === 'Message failed to send', 'Error title persisted');
+      assert(savedFailEvent.payload_summary.errors[0].details.includes('parameter count mismatch'), 'error_data.details persisted in payload_summary');
     }
 
     // -------------------------------------------------------------

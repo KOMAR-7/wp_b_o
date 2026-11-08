@@ -6,6 +6,7 @@
 const prisma = require('../config/database');
 const logger = require('../utils/logger');
 const { resolveTenantByPhoneNumberId } = require('./tenant.service');
+const { sanitizeStatusErrors } = require('../parsers/webhook-parser');
 
 /**
  * Persists an incoming webhook event record to PostgreSQL for idempotency and auditability.
@@ -36,6 +37,9 @@ async function recordIncomingEvent(event) {
     }
   }
 
+  // Sanitize errors if present on status events (extract code, title, message, details and redact tokens)
+  const sanitizedErrors = event.errors ? sanitizeStatusErrors(event.errors) : null;
+
   // Comprehensive audit summary capturing parsed details for debugging and retry
   const payloadSummary = {
     category: event.category,
@@ -49,7 +53,11 @@ async function recordIncomingEvent(event) {
     ...(event.location ? { location: event.location } : {}),
     ...(event.buttonReply ? { buttonReply: event.buttonReply } : {}),
     ...(event.interactiveReply ? { interactiveReply: event.interactiveReply } : {}),
-    ...(event.status ? { status: event.status, recipientId: event.recipientId } : {})
+    ...(event.status ? {
+      status: event.status,
+      recipientId: event.recipientId,
+      ...(sanitizedErrors && sanitizedErrors.length > 0 ? { errors: sanitizedErrors } : {})
+    } : {})
   };
 
   // Fast-path idempotency check: Safely identify duplicate webhook retries without database constraint collisions

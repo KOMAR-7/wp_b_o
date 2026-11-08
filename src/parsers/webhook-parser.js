@@ -16,6 +16,53 @@ function safeParseCoordinate(val) {
 }
 
 /**
+ * Sanitizes and normalizes Meta Cloud API status error objects.
+ * Extracts code, title, message, and error_data.details safely.
+ * Redacts any accidental tokens or authorization keys.
+ *
+ * @param {Array<Object>|Object|null} rawErrors
+ * @returns {Array<{code: number|null, title: string|null, message: string|null, details: string|null, href: string|null}>|null}
+ */
+function sanitizeStatusErrors(rawErrors) {
+  if (!rawErrors) return null;
+  const list = Array.isArray(rawErrors) ? rawErrors : [rawErrors];
+  if (list.length === 0) return null;
+
+  return list.map(err => {
+    if (!err || typeof err !== 'object') {
+      const sanitizedStr = String(err).replace(/EAA[a-zA-Z0-9_-]+/g, '[REDACTED_TOKEN]');
+      return { code: null, title: null, message: sanitizedStr, details: null, href: null };
+    }
+
+    const code = typeof err.code === 'number'
+      ? err.code
+      : (err.code ? (Number(err.code) || null) : null);
+
+    const title = typeof err.title === 'string'
+      ? err.title.replace(/EAA[a-zA-Z0-9_-]+/g, '[REDACTED_TOKEN]')
+      : null;
+
+    const message = typeof err.message === 'string'
+      ? err.message.replace(/EAA[a-zA-Z0-9_-]+/g, '[REDACTED_TOKEN]')
+      : null;
+
+    const rawDetails = err.error_data && typeof err.error_data.details === 'string'
+      ? err.error_data.details
+      : (typeof err.details === 'string' ? err.details : null);
+
+    const details = rawDetails
+      ? rawDetails.replace(/EAA[a-zA-Z0-9_-]+/g, '[REDACTED_TOKEN]')
+      : null;
+
+    const href = typeof err.href === 'string'
+      ? err.href.replace(/EAA[a-zA-Z0-9_-]+/g, '[REDACTED_TOKEN]')
+      : null;
+
+    return { code, title, message, details, href };
+  });
+}
+
+/**
  * Extracts and parses all actionable messages from an incoming Meta webhook body.
  * Returns an array of normalized message event objects.
  *
@@ -61,7 +108,7 @@ function parseWebhookPayload(payload) {
             status: statusObj.status || null, // 'sent', 'delivered', 'read', 'failed'
             recipientId: statusObj.recipient_id || null,
             timestamp: statusObj.timestamp || null,
-            errors: statusObj.errors || null
+            errors: sanitizeStatusErrors(statusObj.errors)
           });
         }
         continue;
@@ -250,5 +297,6 @@ function parseMessageDetails(type, message) {
 module.exports = {
   parseWebhookPayload,
   parseMessageDetails,
-  safeParseCoordinate
+  safeParseCoordinate,
+  sanitizeStatusErrors
 };

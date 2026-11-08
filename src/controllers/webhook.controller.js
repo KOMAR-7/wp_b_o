@@ -54,11 +54,22 @@ async function handleIncomingEvent(req, res) {
       }
 
       if (event.category === 'STATUS_RECEIPT') {
-        logger.info('WhatsApp status receipt persisted', {
-          recipientId: event.recipientId,
-          status: event.status,
-          messageId: event.messageId
-        });
+        if (event.status === 'failed') {
+          // Asynchronous delivery failure reported by Meta Cloud API (e.g. template error, undeliverable, 24h window)
+          logger.warn('WhatsApp message delivery failed asynchronously by Meta Cloud API', {
+            messageId: event.messageId,
+            recipientId: event.recipientId,
+            phoneNumberId: event.phoneNumberId,
+            status: event.status,
+            errors: event.errors || []
+          });
+        } else {
+          logger.info('WhatsApp status receipt persisted', {
+            recipientId: event.recipientId,
+            status: event.status,
+            messageId: event.messageId
+          });
+        }
         if (eventRecord) {
           await markEventCompleted(eventRecord.id);
         }
