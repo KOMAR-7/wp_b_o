@@ -261,7 +261,12 @@ async function runTests() {
     assert(sanitizedRestA.id === restA.id, 'Restaurant sanitized successfully');
     assert(sanitizedRestA.access_token === undefined, 'Restaurant access token stripped');
     assert(sanitizedRestA.access_token_encrypted === undefined, 'Restaurant ciphertext stripped');
-    assert(JSON.stringify(sanitizedRestA).includes('central') === false, 'Zero Central credentials leak into restaurant API objects');
+    assert(
+      JSON.stringify(sanitizedRestA).includes('EAAB_test_super_secret') === false &&
+      JSON.stringify(sanitizedRestA).includes('enc:v1') === false &&
+      sanitizedRestA.central_account?.access_token_encrypted === undefined,
+      'Zero Central credentials leak into restaurant API objects'
+    );
 
     console.log('\n--- TEST GROUP 6: Tenant-Scoped Order Lookup Isolation ---');
     // Verify findTenantOrder enforces scoping

@@ -13,16 +13,30 @@ const {
   handleUpdateRestaurantStatus,
   handleRetryOutbox
 } = require('../controllers/admin-restaurant.controller');
+const {
+  handleGetUnassignedRestaurants,
+  handleAssignRestaurant,
+  handleUnassignRestaurant
+} = require('../controllers/admin-central-account.controller');
 const { requireSuperAdminAuth } = require('../middleware/requireSuperAdminAuth');
 
 // All restaurant management routes strictly require Super Admin authentication
 router.use(requireSuperAdminAuth);
+
+// GET /api/admin/restaurants/unassigned-central-account — List restaurants without central account
+router.get('/unassigned-central-account', handleGetUnassignedRestaurants);
 
 // GET /api/admin/restaurants — List restaurants with pagination, search & filters
 router.get('/', handleListRestaurants);
 
 // POST /api/admin/restaurants — Manually register/onboard new restaurant
 router.post('/', handleCreateRestaurant);
+
+// PUT /api/admin/restaurants/:restaurantId/central-account — Assign restaurant to central account
+router.put('/:restaurantId/central-account', handleAssignRestaurant);
+
+// DELETE /api/admin/restaurants/:restaurantId/central-account — Remove central account assignment
+router.delete('/:restaurantId/central-account', handleUnassignRestaurant);
 
 // GET /api/admin/restaurants/:id — Get full restaurant profile, subscriptions & payments
 router.get('/:id', handleGetRestaurantById);

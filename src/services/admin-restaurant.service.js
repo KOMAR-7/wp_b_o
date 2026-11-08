@@ -157,6 +157,9 @@ async function listRestaurants({
       take: limitNum,
       orderBy: { [sortField]: sortDirection },
       include: {
+        central_account: {
+          select: { id: true, account_name: true, phone_number_id: true, is_active: true }
+        },
         subscriptions: {
           where: { status: 'ACTIVE' },
           take: 1,
@@ -429,6 +432,9 @@ async function getRestaurantById(id) {
   const restaurant = await prisma.restaurant.findUnique({
     where: { id },
     include: {
+      central_account: {
+        select: { id: true, account_name: true, phone_number_id: true, is_active: true }
+      },
       subscriptions: {
         orderBy: { created_at: 'desc' }
       },

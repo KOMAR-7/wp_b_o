@@ -38,7 +38,8 @@
     "test:r6:template": "node test/r6-central-template-approval-test.js",
     "test:r6:admin": "node test/r6-central-admin-api-test.js",
     "test:r6:staging": "node test/r6-7-staging-verification-test.js",
-    "test:r6:all": "node test/r6-central-database-config-test.js && node test/r6-central-webhook-test.js && node test/r6-central-dispatch-test.js && node test/r6-central-order-routing-test.js && node test/r6-central-security-test.js && node test/r6-central-template-approval-test.js && node test/r6-central-admin-api-test.js && node test/r6-7-staging-verification-test.js",
+    "test:r6:8": "node test/r6-8-central-account-management-test.js",
+    "test:r6:all": "node test/r6-central-database-config-test.js && node test/r6-central-webhook-test.js && node test/r6-central-dispatch-test.js && node test/r6-central-order-routing-test.js && node test/r6-central-security-test.js && node test/r6-central-template-approval-test.js && node test/r6-central-admin-api-test.js && node test/r6-7-staging-verification-test.js && node test/r6-8-central-account-management-test.js",
     "admin:create": "node scripts/create-super-admin.js",
     "db:seed": "node prisma/seed.js"
   },

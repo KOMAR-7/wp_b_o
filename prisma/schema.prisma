@@ -97,6 +97,10 @@ model Restaurant {
   internal_notes         String?               @db.Text
   tenant_status          TenantStatus          @default(ACTIVE)
 
+  // R6.8: Central WhatsApp Account Assignment
+  central_account_id     String?               @db.Uuid
+  central_account        CentralWhatsAppAccount? @relation(fields: [central_account_id], references: [id], onDelete: SetNull)
+
   orders                 Order[]
   sessions               ConversationSession[]
   saved_addresses        SavedAddress[]
@@ -106,6 +110,7 @@ model Restaurant {
   subscriptions          Subscription[]
   payments               Payment[]
 
+  @@index([central_account_id])
   @@map("restaurants")
 }
 
@@ -344,16 +349,25 @@ model AuditLog {
 // =============================================================================
 
 model CentralWhatsAppAccount {
-  id                     String    @id @default(uuid()) @db.Uuid
-  phone_number_id        String    @unique @db.VarChar(64)
-  waba_id                String    @db.VarChar(64)
-  display_phone_number   String?   @db.VarChar(32)
-  access_token_encrypted String    @db.Text
-  templates              Json?     @default("{}") @db.JsonB
-  is_active              Boolean   @default(true)
-  created_at             DateTime  @default(now()) @db.Timestamptz()
-  updated_at             DateTime  @updatedAt @db.Timestamptz()
+  id                     String        @id @default(uuid()) @db.Uuid
+  account_name           String        @default("Central WhatsApp Account") @db.VarChar(255)
+  description            String?       @db.Text
+  phone_number_id        String        @unique @db.VarChar(64)
+  waba_id                String        @db.VarChar(64)
+  display_phone_number   String?       @db.VarChar(32)
+  access_token_encrypted String        @db.Text
+  templates              Json?         @default("{}") @db.JsonB
+  is_active              Boolean       @default(true)
+  verification_status    String?       @default("UNVERIFIED") @db.VarChar(64)
+  last_tested_at         DateTime?     @db.Timestamptz()
+  verification_error     String?       @db.Text
+  deleted_at             DateTime?     @db.Timestamptz()
+  created_at             DateTime      @default(now()) @db.Timestamptz()
+  updated_at             DateTime      @updatedAt @db.Timestamptz()
+
+  restaurants            Restaurant[]
 
   @@index([is_active])
+  @@index([deleted_at])
   @@map("central_whatsapp_accounts")
 }

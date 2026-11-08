@@ -13,7 +13,8 @@
     restaurants: { page: 1, limit: 10, search: '', status: '' },
     subscriptions: { page: 1, limit: 10, search: '', status: '', restaurant_id: '' },
     payments: { page: 1, limit: 10, status: '', payment_mode: '', restaurant_id: '' },
-    auditLogs: { page: 1, limit: 20, action: '', entity_type: '' }
+    auditLogs: { page: 1, limit: 20, action: '', entity_type: '' },
+    centralAccounts: { search: '', status: '', items: [], currentManagingAccountId: null }
   };
 
   // =========================================================================
@@ -158,6 +159,7 @@
     const titles = {
       dashboard: 'Dashboard Overview',
       restaurants: 'Restaurant Tenants',
+      'central-accounts': 'Central WhatsApp Accounts',
       subscriptions: 'Client Subscriptions',
       payments: 'Manual Payment Records',
       'audit-logs': 'System Audit Logs',
@@ -168,6 +170,7 @@
     // Load active tab data
     if (tabName === 'dashboard') loadDashboard();
     else if (tabName === 'restaurants') loadRestaurants();
+    else if (tabName === 'central-accounts') loadCentralAccounts();
     else if (tabName === 'subscriptions') loadSubscriptions();
     else if (tabName === 'payments') loadPayments();
     else if (tabName === 'audit-logs') loadAuditLogs();
@@ -719,6 +722,220 @@
   }
 
   // =========================================================================
+  // TAB 7: CENTRAL WHATSAPP ACCOUNTS
+  // =========================================================================
+
+  async function loadCentralAccounts() {
+    try {
+      const q = new URLSearchParams();
+      if (state.centralAccounts.status) q.append('status', state.centralAccounts.status);
+      if (state.centralAccounts.search) q.append('search', state.centralAccounts.search);
+
+      const [accountsData, unassignedData] = await Promise.all([
+        apiCall(`/api/admin/central-accounts?${q.toString()}`),
+        apiCall('/api/admin/restaurants/unassigned-central-account').catch(() => ({ restaurants: [] }))
+      ]);
+
+      const accounts = accountsData.accounts || [];
+      state.centralAccounts.items = accounts;
+
+      // Update stat cards
+      const totalAccounts = accounts.length;
+      const activeAccounts = accounts.filter(a => a.is_active).length;
+      const inactiveAccounts = totalAccounts - activeAccounts;
+      const verifiedAccounts = accounts.filter(a => a.verification_status === 'CONNECTED').length;
+      const unverifiedAccounts = totalAccounts - verifiedAccounts;
+      const assignedCount = accounts.reduce((sum, a) => sum + (a.assigned_restaurants_count || 0), 0);
+      const unassignedCount = (unassignedData.restaurants || []).length;
+
+      const totalEl = document.getElementById('stat-central-total');
+      if (totalEl) totalEl.textContent = totalAccounts;
+      const activeEl = document.getElementById('stat-central-active');
+      if (activeEl) activeEl.textContent = `${activeAccounts} Active`;
+      const inactiveEl = document.getElementById('stat-central-inactive');
+      if (inactiveEl) inactiveEl.textContent = `${inactiveAccounts} Inactive`;
+
+      const verifiedEl = document.getElementById('stat-central-verified');
+      if (verifiedEl) verifiedEl.textContent = verifiedAccounts;
+      const unverifiedEl = document.getElementById('stat-central-unverified');
+      if (unverifiedEl) unverifiedEl.textContent = `${unverifiedAccounts} Unverified`;
+
+      const assignedEl = document.getElementById('stat-central-assigned-rests');
+      if (assignedEl) assignedEl.textContent = assignedCount;
+      const unassignedEl = document.getElementById('stat-central-unassigned-rests');
+      if (unassignedEl) unassignedEl.textContent = `${unassignedCount} unassigned`;
+
+      // Render table rows
+      const tbody = document.getElementById('central-accounts-table-body');
+      if (!tbody) return;
+
+      if (accounts.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">No Central WhatsApp accounts found. Click "+ Add Central Account" to register one.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = accounts.map((a) => {
+        let connBadge;
+        if (a.verification_status === 'CONNECTED') {
+          connBadge = '<span class="badge badge-success">Connected</span>';
+        } else if (a.verification_status === 'DISCONNECTED') {
+          connBadge = '<span class="badge badge-danger">Disconnected</span>';
+        } else {
+          connBadge = `<span class="badge badge-warning">${escapeHtml(a.verification_status || 'UNVERIFIED')}</span>`;
+        }
+
+        const activeBadge = a.is_active
+          ? '<span class="badge badge-success">ACTIVE</span>'
+          : '<span class="badge badge-secondary">INACTIVE</span>';
+
+        return `
+          <tr>
+            <td>
+              <strong>${escapeHtml(a.account_name)}</strong>
+              ${a.description ? `<br><small class="text-muted">${escapeHtml(a.description)}</small>` : ''}
+            </td>
+            <td><code>${escapeHtml(a.display_phone_number || '-')}</code></td>
+            <td><code>${escapeHtml(a.phone_number_id)}</code></td>
+            <td><code>${escapeHtml(a.waba_id)}</code></td>
+            <td>${connBadge}</td>
+            <td>${activeBadge}</td>
+            <td>
+              <button class="btn btn-outline btn-xs central-manage-rests-btn" data-id="${a.id}" data-name="${escapeHtml(a.account_name)}">
+                🏷️ ${a.assigned_restaurants_count || 0} Assigned
+              </button>
+            </td>
+            <td class="text-muted small">${a.last_tested_at ? formatDateTime(a.last_tested_at) : 'Never'}</td>
+            <td>
+              <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+                <button class="btn btn-outline btn-xs central-test-btn" data-id="${a.id}" title="Test Meta API Connection">⚡ Test</button>
+                <button class="btn btn-outline btn-xs central-view-btn" data-id="${a.id}" title="View Details">👁️</button>
+                <button class="btn btn-outline btn-xs central-edit-btn" data-id="${a.id}" title="Edit Account">✏️</button>
+                <button class="btn ${a.is_active ? 'btn-warning' : 'btn-success'} btn-xs central-toggle-btn" data-id="${a.id}" data-active="${a.is_active}">
+                  ${a.is_active ? 'Deactivate' : 'Activate'}
+                </button>
+                <button class="btn btn-danger btn-xs central-delete-btn" data-id="${a.id}" data-name="${escapeHtml(a.account_name)}" title="Delete Account">🗑️</button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    } catch (err) {
+      showToast(`Failed to load Central WhatsApp accounts: ${err.message}`, 'error');
+    }
+  }
+
+  async function handleViewCentralAccount(id) {
+    try {
+      const data = await apiCall(`/api/admin/central-accounts/${id}`);
+      const a = data.account;
+      const rests = data.restaurants || [];
+
+      document.getElementById('view-central-name').textContent = a.account_name;
+      document.getElementById('view-central-display').textContent = a.display_phone_number || '-';
+      document.getElementById('view-central-phoneid').textContent = a.phone_number_id;
+      document.getElementById('view-central-wabaid').textContent = a.waba_id;
+      document.getElementById('view-central-status').textContent = a.is_active ? 'ACTIVE' : 'INACTIVE';
+      document.getElementById('view-central-conn-status').textContent = a.verification_status;
+      document.getElementById('view-central-tested').textContent = a.last_tested_at ? formatDateTime(a.last_tested_at) : 'Never';
+      document.getElementById('view-central-count').textContent = `${rests.length} Assigned`;
+      document.getElementById('view-central-desc').textContent = a.description || 'None';
+
+      const alertEl = document.getElementById('view-central-error-alert');
+      if (a.verification_error) {
+        document.getElementById('view-central-error-msg').textContent = a.verification_error;
+        alertEl.style.display = 'block';
+      } else {
+        alertEl.style.display = 'none';
+      }
+
+      const restsTbody = document.getElementById('view-central-rests-body');
+      if (rests.length > 0) {
+        restsTbody.innerHTML = rests.map(r => `
+          <tr>
+            <td><strong>${escapeHtml(r.name)}</strong></td>
+            <td><code>${escapeHtml(r.phone_number_id)}</code></td>
+            <td>${escapeHtml(r.owner_name || '-')} (${escapeHtml(r.owner_phone || '-')})</td>
+            <td><span class="badge ${r.is_active ? 'badge-success' : 'badge-secondary'}">${escapeHtml(r.tenant_status || (r.is_active ? 'ACTIVE' : 'INACTIVE'))}</span></td>
+          </tr>
+        `).join('');
+      } else {
+        restsTbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No restaurants currently assigned to this account</td></tr>';
+      }
+
+      openModal('modal-view-central-account');
+    } catch (err) {
+      showToast(`Failed to view account: ${err.message}`, 'error');
+    }
+  }
+
+  async function handleEditCentralAccount(id) {
+    try {
+      const data = await apiCall(`/api/admin/central-accounts/${id}`);
+      const a = data.account;
+
+      document.getElementById('edit-central-id').value = a.id;
+      document.getElementById('edit-central-name').value = a.account_name;
+      document.getElementById('edit-central-display').value = a.display_phone_number || '';
+      document.getElementById('edit-central-phoneid').value = a.phone_number_id;
+      document.getElementById('edit-central-wabaid').value = a.waba_id;
+      document.getElementById('edit-central-description').value = a.description || '';
+      document.getElementById('edit-central-token').value = '';
+
+      openModal('modal-edit-central-account');
+    } catch (err) {
+      showToast(`Failed to load account for editing: ${err.message}`, 'error');
+    }
+  }
+
+  async function handleManageAssignments(accountId, accountName) {
+    try {
+      state.centralAccounts.currentManagingAccountId = accountId;
+      document.getElementById('assign-modal-account-name').textContent = accountName;
+
+      await refreshAssignmentsModal();
+      openModal('modal-assign-central-restaurants');
+    } catch (err) {
+      showToast(`Failed to load assignments: ${err.message}`, 'error');
+    }
+  }
+
+  async function refreshAssignmentsModal() {
+    const accountId = state.centralAccounts.currentManagingAccountId;
+    if (!accountId) return;
+
+    const [assignedData, unassignedData] = await Promise.all([
+      apiCall(`/api/admin/central-accounts/${accountId}/restaurants`),
+      apiCall('/api/admin/restaurants/unassigned-central-account')
+    ]);
+
+    const assigned = assignedData.restaurants || [];
+    const unassigned = unassignedData.restaurants || [];
+
+    const dropdown = document.getElementById('assign-restaurant-dropdown');
+    dropdown.innerHTML = '<option value="">Select unassigned restaurant...</option>' +
+      unassigned.map(r => `<option value="${r.id}">${escapeHtml(r.name)} (${escapeHtml(r.phone_number_id)})</option>`).join('');
+
+    const tbody = document.getElementById('assigned-restaurants-table-body');
+    if (assigned.length > 0) {
+      tbody.innerHTML = assigned.map(r => `
+        <tr>
+          <td><strong>${escapeHtml(r.name)}</strong></td>
+          <td><code>${escapeHtml(r.phone_number_id)}</code></td>
+          <td>${escapeHtml(r.owner_phone || '-')}</td>
+          <td><span class="badge ${r.is_active ? 'badge-success' : 'badge-secondary'}">${escapeHtml(r.tenant_status || 'ACTIVE')}</span></td>
+          <td>
+            <button class="btn btn-outline btn-xs central-unassign-btn" data-id="${r.id}" data-name="${escapeHtml(r.name)}">
+              Unassign
+            </button>
+          </td>
+        </tr>
+      `).join('');
+    } else {
+      tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No restaurants currently assigned to this account</td></tr>';
+    }
+  }
+
+  // =========================================================================
   // HELPER: RENDER PAGINATION
   // =========================================================================
 
@@ -831,6 +1048,8 @@
     document.getElementById('refresh-activity-btn').addEventListener('click', loadDashboard);
     document.getElementById('refresh-audit-logs-btn').addEventListener('click', loadAuditLogs);
     document.getElementById('refresh-system-btn').addEventListener('click', loadSystemDiagnostics);
+    const refreshCentralBtn = document.getElementById('refresh-central-accounts-btn');
+    if (refreshCentralBtn) refreshCentralBtn.addEventListener('click', loadCentralAccounts);
 
     // Generic modal close buttons
     document.querySelectorAll('[data-close]').forEach((btn) => {
@@ -888,7 +1107,33 @@
       loadAuditLogs();
     });
 
+    // Central Accounts Search & Filter
+    const centralSearch = document.getElementById('central-search-input');
+    if (centralSearch) {
+      centralSearch.addEventListener('input', (e) => {
+        state.centralAccounts.search = e.target.value;
+        loadCentralAccounts();
+      });
+    }
+
+    const centralFilter = document.getElementById('central-status-filter');
+    if (centralFilter) {
+      centralFilter.addEventListener('change', (e) => {
+        state.centralAccounts.status = e.target.value;
+        loadCentralAccounts();
+      });
+    }
+
     // Modal Triggers
+    const openCentralBtn = document.getElementById('open-create-central-account-btn');
+    if (openCentralBtn) {
+      openCentralBtn.addEventListener('click', () => {
+        const form = document.getElementById('form-create-central-account');
+        if (form) form.reset();
+        openModal('modal-create-central-account');
+      });
+    }
+
     document.getElementById('open-create-restaurant-btn').addEventListener('click', () => {
       document.getElementById('form-create-restaurant').reset();
       openModal('modal-create-restaurant');
@@ -1040,6 +1285,101 @@
       }
     });
 
+    // Central Accounts Form Submissions
+    const formCreateCentral = document.getElementById('form-create-central-account');
+    if (formCreateCentral) {
+      formCreateCentral.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const payload = Object.fromEntries(formData.entries());
+        payload.isActive = Boolean(payload.is_active);
+
+        try {
+          await apiCall('/api/admin/central-accounts', {
+            method: 'POST',
+            body: payload
+          });
+          closeModal('modal-create-central-account');
+          showToast('Central WhatsApp account registered successfully!', 'success');
+          loadCentralAccounts();
+        } catch (err) {
+          showToast(`Failed to register account: ${err.message}`, 'error');
+        }
+      });
+    }
+
+    const formEditCentral = document.getElementById('form-edit-central-account');
+    if (formEditCentral) {
+      formEditCentral.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const id = document.getElementById('edit-central-id').value;
+        const payload = {
+          accountName: document.getElementById('edit-central-name').value.trim(),
+          displayPhoneNumber: document.getElementById('edit-central-display').value.trim() || null,
+          phoneNumberId: document.getElementById('edit-central-phoneid').value.trim(),
+          wabaId: document.getElementById('edit-central-wabaid').value.trim(),
+          description: document.getElementById('edit-central-description').value.trim() || null
+        };
+        const token = document.getElementById('edit-central-token').value.trim();
+        if (token) {
+          payload.accessToken = token;
+        }
+
+        try {
+          await apiCall(`/api/admin/central-accounts/${id}`, {
+            method: 'PATCH',
+            body: payload
+          });
+          closeModal('modal-edit-central-account');
+          showToast('Central WhatsApp account updated successfully!', 'success');
+          loadCentralAccounts();
+        } catch (err) {
+          showToast(`Failed to update account: ${err.message}`, 'error');
+        }
+      });
+    }
+
+    const formAssignRes = document.getElementById('form-assign-restaurant');
+    if (formAssignRes) {
+      formAssignRes.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const restaurantId = document.getElementById('assign-restaurant-dropdown').value;
+        const centralAccountId = state.centralAccounts.currentManagingAccountId;
+        if (!restaurantId || !centralAccountId) return;
+
+        try {
+          await apiCall(`/api/admin/restaurants/${restaurantId}/central-account`, {
+            method: 'PUT',
+            body: { centralAccountId }
+          });
+          showToast('Restaurant assigned successfully!', 'success');
+          await refreshAssignmentsModal();
+          loadCentralAccounts();
+        } catch (err) {
+          showToast(`Failed to assign restaurant: ${err.message}`, 'error');
+        }
+      });
+    }
+
+    const formDeleteCentral = document.getElementById('form-delete-central-account');
+    if (formDeleteCentral) {
+      formDeleteCentral.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const id = document.getElementById('delete-central-id').value;
+
+        try {
+          const res = await apiCall(`/api/admin/central-accounts/${id}`, {
+            method: 'DELETE'
+          });
+          closeModal('modal-delete-central-account');
+          showToast(res.message || 'Account deleted successfully', 'success');
+          loadCentralAccounts();
+        } catch (err) {
+          showToast(`Deletion failed: ${err.message}`, 'error');
+        }
+      });
+    }
+
     // Delegated click handlers for dynamic table rows
     document.addEventListener('click', (e) => {
       // View Restaurant
@@ -1123,6 +1463,104 @@
           document.getElementById('audit-meta-pre').textContent = JSON.stringify(raw, null, 2);
           openModal('modal-view-audit');
         } catch (_) {}
+        return;
+      }
+
+      // View Central WhatsApp Account
+      const viewCentralBtn = e.target.closest('.central-view-btn');
+      if (viewCentralBtn) {
+        handleViewCentralAccount(viewCentralBtn.dataset.id);
+        return;
+      }
+
+      // Edit Central WhatsApp Account
+      const editCentralBtn = e.target.closest('.central-edit-btn');
+      if (editCentralBtn) {
+        handleEditCentralAccount(editCentralBtn.dataset.id);
+        return;
+      }
+
+      // Manage Assigned Restaurants
+      const manageRestsBtn = e.target.closest('.central-manage-rests-btn');
+      if (manageRestsBtn) {
+        handleManageAssignments(manageRestsBtn.dataset.id, manageRestsBtn.dataset.name);
+        return;
+      }
+
+      // Test Central Connection
+      const testCentralBtn = e.target.closest('.central-test-btn');
+      if (testCentralBtn) {
+        const id = testCentralBtn.dataset.id;
+        testCentralBtn.disabled = true;
+        const originalText = testCentralBtn.innerHTML;
+        testCentralBtn.textContent = '⏳ Testing...';
+
+        apiCall(`/api/admin/central-accounts/${id}/test-connection`, { method: 'POST' })
+          .then((res) => {
+            if (res.verified) {
+              showToast(`Connected! Meta Verified: ${res.verifiedName || 'Valid'} (Quality: ${res.qualityRating || 'GREEN'})`, 'success');
+            } else {
+              showToast(`Connection test failed: ${res.error}`, 'error');
+            }
+            loadCentralAccounts();
+          })
+          .catch((err) => {
+            showToast(`Test error: ${err.message}`, 'error');
+          })
+          .finally(() => {
+            testCentralBtn.disabled = false;
+            testCentralBtn.innerHTML = originalText;
+          });
+        return;
+      }
+
+      // Activate / Deactivate Central Account
+      const toggleCentralBtn = e.target.closest('.central-toggle-btn');
+      if (toggleCentralBtn) {
+        const id = toggleCentralBtn.dataset.id;
+        const isActive = toggleCentralBtn.dataset.active === 'true';
+        const action = isActive ? 'deactivate' : 'activate';
+
+        apiCall(`/api/admin/central-accounts/${id}/${action}`, { method: 'POST' })
+          .then((res) => {
+            if (res.warning) {
+              showToast(res.warning, 'warning');
+            } else {
+              showToast(`Central WhatsApp account ${isActive ? 'deactivated' : 'activated'} successfully`, 'success');
+            }
+            loadCentralAccounts();
+          })
+          .catch((err) => {
+            showToast(`Action failed: ${err.message}`, 'error');
+          });
+        return;
+      }
+
+      // Delete Central Account
+      const deleteCentralBtn = e.target.closest('.central-delete-btn');
+      if (deleteCentralBtn) {
+        document.getElementById('delete-central-id').value = deleteCentralBtn.dataset.id;
+        document.getElementById('delete-central-name').textContent = deleteCentralBtn.dataset.name;
+        openModal('modal-delete-central-account');
+        return;
+      }
+
+      // Unassign Restaurant from Central Account
+      const unassignBtn = e.target.closest('.central-unassign-btn');
+      if (unassignBtn) {
+        const resId = unassignBtn.dataset.id;
+        const resName = unassignBtn.dataset.name;
+        if (confirm(`Unassign "${resName}" from this Central WhatsApp account?`)) {
+          apiCall(`/api/admin/restaurants/${resId}/central-account`, { method: 'DELETE' })
+            .then(() => {
+              showToast(`"${resName}" unassigned successfully`, 'success');
+              refreshAssignmentsModal();
+              loadCentralAccounts();
+            })
+            .catch((err) => {
+              showToast(`Unassign failed: ${err.message}`, 'error');
+            });
+        }
         return;
       }
     });

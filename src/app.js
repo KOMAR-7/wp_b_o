@@ -97,6 +97,7 @@ app.use('/api/admin/dashboard', adminDashboardRoutes);
 app.use('/api/admin/system', adminSystemRoutes);
 app.use('/api/admin/audit-logs', adminAuditLogRoutes);
 app.use('/api/admin/central-account', adminCentralAccountRoutes);
+app.use('/api/admin/central-accounts', adminCentralAccountRoutes);
 
 // Super Admin Frontend Panel
 app.get('/admin', (req, res) => {

@@ -439,7 +439,7 @@ async function dispatchPendingOutboxMessages({
       if (customSender) {
         dispatchResult = await customSender(msg);
       } else if (msg.sender_channel === 'CENTRAL') {
-        const creds = await resolveCentralCredentials();
+        const creds = await resolveCentralCredentials({ restaurantId: msg.restaurant_id });
         dispatchResult = await sendWhatsAppMessage({
           phoneNumberId: creds.phoneNumberId,
           accessToken: creds.accessToken,

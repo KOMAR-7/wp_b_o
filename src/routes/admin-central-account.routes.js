@@ -1,15 +1,27 @@
 /**
  * RESTOPRO — Super Admin Central WhatsApp Management Routes
- * Mount point: /api/admin/central-account
+ * Mount points:
+ * - /api/admin/central-account   (Singular / Legacy backward-compatible)
+ * - /api/admin/central-accounts  (Plural / Multi-account management)
  */
 const express = require('express');
 const router = express.Router();
 
 const {
+  handleListCentralAccounts,
+  handleGetCentralAccountById,
   handleGetCentralAccount,
   handleCreateCentralAccount,
+  handleCreateCentralAccountPlural,
   handleUpdateCentralAccount,
+  handleUpdateCentralAccountById,
+  handleTestAccountConnectionById,
   handleTestConnection,
+  handleActivateCentralAccount,
+  handleDeactivateCentralAccount,
+  handleDeleteCentralAccount,
+  handleGetAssignedRestaurants,
+  handleGetUnassignedRestaurants,
   handleGetTemplates,
   handleGetTemplateDefinitions,
   handleUpdateTemplate,
@@ -22,32 +34,46 @@ const { centralConnectionTestRateLimiter } = require('../middleware/adminRateLim
 // All central account routes strictly require Super Admin authentication
 router.use(requireSuperAdminAuth);
 
-// GET /api/admin/central-account — Get active central account configuration & health
-router.get('/', handleGetCentralAccount);
+// Root collection GET: Return all accounts if /central-accounts or ?all=true; else active account for legacy
+router.get('/', (req, res, next) => {
+  if (req.baseUrl === '/api/admin/central-accounts' || req.query.all === 'true') {
+    return handleListCentralAccounts(req, res, next);
+  }
+  return handleGetCentralAccount(req, res, next);
+});
 
-// POST /api/admin/central-account — Onboard/register new Central WhatsApp account
-router.post('/', handleCreateCentralAccount);
+// Root collection POST: Multi-account if /central-accounts; single-active defense if legacy /central-account
+router.post('/', (req, res, next) => {
+  if (req.baseUrl === '/api/admin/central-accounts') {
+    return handleCreateCentralAccountPlural(req, res, next);
+  }
+  return handleCreateCentralAccount(req, res, next);
+});
 
-// PATCH /api/admin/central-account — Update/rotate credentials for Central WhatsApp account
+// Root PATCH: Update active account (Legacy)
 router.patch('/', handleUpdateCentralAccount);
 
-// POST /api/admin/central-account/test-connection — Test Meta API connectivity (Rate Limited)
+// Test connection on active central account (Legacy)
 router.post('/test-connection', centralConnectionTestRateLimiter, handleTestConnection);
 
-// GET /api/admin/central-account/templates — Get individual status for the 3 templates
+// Unassigned restaurants lookup
+router.get('/unassigned-restaurants', handleGetUnassignedRestaurants);
+
+// Template management endpoints (Shared)
 router.get('/templates', handleGetTemplates);
-
-// GET /api/admin/central-account/templates/definitions — Get copy-ready Meta template definitions
 router.get('/templates/definitions', handleGetTemplateDefinitions);
-
-// POST /api/admin/central-account/templates/submit — Submit template(s) directly to Meta Graph API
 router.post('/templates/submit', handleSubmitTemplatesToMeta);
-
-// POST /api/admin/central-account/templates/verify-meta — Query Meta Graph API directly for template approval
 router.post('/templates/verify-meta', handleVerifyTemplatesWithMeta);
-
-// PATCH /api/admin/central-account/templates/:templateName — Update individual template approval
 router.patch('/templates/:templateName', handleUpdateTemplate);
 
-module.exports = router;
+// Specific account ID operations
+router.get('/:id', handleGetCentralAccountById);
+router.patch('/:id', handleUpdateCentralAccountById);
+router.put('/:id', handleUpdateCentralAccountById);
+router.delete('/:id', handleDeleteCentralAccount);
+router.post('/:id/test-connection', centralConnectionTestRateLimiter, handleTestAccountConnectionById);
+router.post('/:id/activate', handleActivateCentralAccount);
+router.post('/:id/deactivate', handleDeactivateCentralAccount);
+router.get('/:id/restaurants', handleGetAssignedRestaurants);
 
+module.exports = router;

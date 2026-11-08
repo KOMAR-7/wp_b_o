@@ -65,6 +65,9 @@
         <a href="#restaurants" class="nav-item" data-tab="restaurants">
           <span class="nav-icon">🍽️</span> Restaurants
         </a>
+        <a href="#central-accounts" class="nav-item" data-tab="central-accounts">
+          <span class="nav-icon">📱</span> Central WhatsApp
+        </a>
         <a href="#subscriptions" class="nav-item" data-tab="subscriptions">
           <span class="nav-icon">📅</span> Subscriptions
         </a>
@@ -458,6 +461,107 @@
 
             <div class="alert alert-info mt-4">
               <strong>Security Invariant:</strong> Database credentials, connection strings, Meta access tokens, and raw SQL consoles are strictly blocked from the Super Admin interface to safeguard production data integrity.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 7: CENTRAL WHATSAPP ACCOUNTS -->
+      <section id="tab-central-accounts" class="tab-pane">
+        <!-- Stat Cards Grid -->
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-header">
+              <span class="stat-label">Total Accounts</span>
+              <span class="stat-tag">Central Numbers</span>
+            </div>
+            <div id="stat-central-total" class="stat-value">0</div>
+            <div class="stat-footer">
+              <span id="stat-central-active" class="badge badge-success">0 Active</span>
+              <span id="stat-central-inactive" class="badge badge-secondary">0 Inactive</span>
+            </div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-header">
+              <span class="stat-label">Verified Connections</span>
+              <span class="stat-tag">Meta Cloud API</span>
+            </div>
+            <div id="stat-central-verified" class="stat-value text-emerald">0</div>
+            <div class="stat-footer">
+              <span id="stat-central-unverified" class="badge badge-warning">0 Unverified</span>
+            </div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-header">
+              <span class="stat-label">Assigned Restaurants</span>
+              <span class="stat-tag">Routing Scope</span>
+            </div>
+            <div id="stat-central-assigned-rests" class="stat-value">0</div>
+            <div class="stat-footer">
+              <span id="stat-central-unassigned-rests" class="text-muted">0 unassigned</span>
+            </div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-header">
+              <span class="stat-label">Production Routing Mode</span>
+              <span class="stat-tag">Global Setting</span>
+            </div>
+            <div id="stat-routing-mode-badge" class="stat-value text-amber" style="font-size: 1.5rem; padding-top: 6px;">LEGACY</div>
+            <div class="stat-footer">
+              <span class="text-muted">Central routing isolated per restaurant</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Central Accounts Management Panel -->
+        <div class="panel mt-4">
+          <div class="panel-header">
+            <div>
+              <h3 class="panel-title">Central WhatsApp Accounts</h3>
+              <p class="panel-subtitle">Multi-number platform dispatch channels for owner alerts and order confirmations</p>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button id="refresh-central-accounts-btn" class="btn btn-outline btn-sm">Refresh</button>
+              <button id="open-create-central-account-btn" class="btn btn-primary">+ Add Central Account</button>
+            </div>
+          </div>
+
+          <div class="panel-toolbar">
+            <div class="search-box">
+              <input type="text" id="central-search-input" class="form-control" placeholder="Search accounts by name, number, phone ID, WABA ID...">
+            </div>
+            <div class="filter-box">
+              <select id="central-status-filter" class="form-control">
+                <option value="">All Statuses</option>
+                <option value="ACTIVE">ACTIVE</option>
+                <option value="INACTIVE">INACTIVE</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="panel-body">
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Account Name</th>
+                    <th>Display Number</th>
+                    <th>Phone Number ID</th>
+                    <th>WABA ID</th>
+                    <th>Connection</th>
+                    <th>Status</th>
+                    <th>Assigned Restaurants</th>
+                    <th>Last Checked</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="central-accounts-table-body">
+                  <tr><td colspan="9" class="text-center text-muted">Loading central accounts...</td></tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -946,6 +1050,249 @@
       <div class="modal-footer">
         <button type="button" class="btn btn-outline" data-close="modal-view-audit">Close</button>
       </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- CENTRAL WHATSAPP MODALS -->
+  <!-- ========================================================================= -->
+
+  <!-- MODAL: Add Central WhatsApp Account -->
+  <div id="modal-create-central-account" class="modal-backdrop" style="display: none;">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title">Register Central WhatsApp Number</h3>
+        <button class="modal-close-btn" data-close="modal-create-central-account">&times;</button>
+      </div>
+      <form id="form-create-central-account">
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label>Account Name *</label>
+              <input type="text" name="account_name" class="form-control" required placeholder="e.g. Central Dispatch North">
+            </div>
+            <div class="form-group col-6">
+              <label>Display Phone Number</label>
+              <input type="text" name="display_phone_number" class="form-control" placeholder="+91 98765 00000">
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label>Meta Phone Number ID *</label>
+              <input type="text" name="phone_number_id" class="form-control" required placeholder="e.g. 109283019283019">
+              <small class="form-hint">Unique Meta Phone ID for this dispatch line</small>
+            </div>
+            <div class="form-group col-6">
+              <label>Meta WABA ID *</label>
+              <input type="text" name="waba_id" class="form-control" required placeholder="e.g. 293840293840293">
+              <small class="form-hint">WhatsApp Business Account ID</small>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Permanent System User Access Token *</label>
+            <input type="password" name="access_token" autocomplete="new-password" class="form-control" required placeholder="EAAB... (Encrypted with AES-256-GCM)">
+            <small class="form-hint">Stored encrypted. Never returned in GET responses or client logs.</small>
+          </div>
+
+          <div class="form-group">
+            <label>Description / Administrative Notes</label>
+            <textarea name="description" class="form-control" rows="2" placeholder="e.g. Central line for North Zone restaurants"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <input type="checkbox" name="is_active" value="true" checked>
+              <span><strong>Account Active immediately</strong></span>
+            </label>
+            <small class="form-hint">If active, this account can be assigned to restaurants for notification routing.</small>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close="modal-create-central-account">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save & Register</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Edit Central WhatsApp Account -->
+  <div id="modal-edit-central-account" class="modal-backdrop" style="display: none;">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title">Edit Central WhatsApp Account</h3>
+        <button class="modal-close-btn" data-close="modal-edit-central-account">&times;</button>
+      </div>
+      <form id="form-edit-central-account">
+        <input type="hidden" id="edit-central-id">
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label>Account Name *</label>
+              <input type="text" id="edit-central-name" class="form-control" required>
+            </div>
+            <div class="form-group col-6">
+              <label>Display Phone Number</label>
+              <input type="text" id="edit-central-display" class="form-control">
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label>Meta Phone Number ID *</label>
+              <input type="text" id="edit-central-phoneid" class="form-control" required>
+            </div>
+            <div class="form-group col-6">
+              <label>Meta WABA ID *</label>
+              <input type="text" id="edit-central-wabaid" class="form-control" required>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Update System User Access Token (Optional)</label>
+            <div style="margin-bottom: 6px;">
+              <span id="edit-central-token-badge" class="badge badge-success">●●●●●●●●●● Token Configured</span>
+            </div>
+            <input type="password" id="edit-central-token" autocomplete="new-password" class="form-control" placeholder="Leave blank to retain current working token">
+            <small class="form-hint">Only enter a new value if rotating credentials. Must start with EAAB...</small>
+          </div>
+
+          <div class="form-group">
+            <label>Description / Administrative Notes</label>
+            <textarea id="edit-central-description" class="form-control" rows="2"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close="modal-edit-central-account">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: View Central WhatsApp Account Details -->
+  <div id="modal-view-central-account" class="modal-backdrop" style="display: none;">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-header">
+        <h3 id="view-central-title" class="modal-title">Central WhatsApp Account Profile</h3>
+        <button class="modal-close-btn" data-close="modal-view-central-account">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="profile-summary-grid">
+          <div><strong>Account Name:</strong> <span id="view-central-name">-</span></div>
+          <div><strong>Display Number:</strong> <span id="view-central-display">-</span></div>
+          <div><strong>Phone Number ID:</strong> <span id="view-central-phoneid" class="badge badge-secondary">-</span></div>
+          <div><strong>WABA ID:</strong> <span id="view-central-wabaid" class="badge badge-secondary">-</span></div>
+          <div><strong>Operational Status:</strong> <span id="view-central-status">-</span></div>
+          <div><strong>Connection Status:</strong> <span id="view-central-conn-status">-</span></div>
+          <div><strong>Last Tested:</strong> <span id="view-central-tested">-</span></div>
+          <div><strong>Assigned Tenants:</strong> <span id="view-central-count" class="badge badge-primary">0</span></div>
+        </div>
+
+        <div id="view-central-error-alert" class="alert alert-danger mt-3" style="display: none;">
+          <strong>Connection Issue:</strong> <span id="view-central-error-msg">-</span>
+        </div>
+
+        <div class="mt-3">
+          <strong>Description:</strong> <span id="view-central-desc" class="text-muted">-</span>
+        </div>
+
+        <div class="mt-4">
+          <h4 class="section-title">Assigned Restaurant Tenants</h4>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Restaurant Name</th>
+                  <th>Restaurant WhatsApp</th>
+                  <th>Owner</th>
+                  <th>Tenant Status</th>
+                </tr>
+              </thead>
+              <tbody id="view-central-rests-body">
+                <tr><td colspan="4" class="text-center text-muted">No restaurants currently assigned to this account</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" data-close="modal-view-central-account">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Manage Restaurant Assignments -->
+  <div id="modal-assign-central-restaurants" class="modal-backdrop" style="display: none;">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-header">
+        <h3 class="modal-title">Manage Restaurant Assignments</h3>
+        <button class="modal-close-btn" data-close="modal-assign-central-restaurants">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p>Assign or unassign restaurant tenants for <strong id="assign-modal-account-name">-</strong>:</p>
+
+        <!-- Assign New Restaurant Toolbar -->
+        <div class="panel p-3 mb-3" style="background: #111827; border: 1px solid #374151; border-radius: 6px;">
+          <h4 style="font-size: 0.95rem; margin-bottom: 8px;">Assign Restaurant</h4>
+          <form id="form-assign-restaurant" style="display: flex; gap: 8px; align-items: center;">
+            <select id="assign-restaurant-dropdown" class="form-control" required style="flex: 1;">
+              <option value="">Select unassigned restaurant...</option>
+            </select>
+            <button type="submit" class="btn btn-primary" id="assign-restaurant-submit-btn">Assign</button>
+          </form>
+        </div>
+
+        <h4 class="section-title">Currently Assigned Restaurants</h4>
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Restaurant Name</th>
+                <th>Restaurant Phone ID</th>
+                <th>Owner Phone</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="assigned-restaurants-table-body">
+              <tr><td colspan="5" class="text-center text-muted">Loading assigned restaurants...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" data-close="modal-assign-central-restaurants">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Safe Deletion Confirmation Dialog -->
+  <div id="modal-delete-central-account" class="modal-backdrop" style="display: none;">
+    <div class="modal-dialog modal-sm">
+      <div class="modal-header">
+        <h3 class="modal-title">Delete Central WhatsApp Account</h3>
+        <button class="modal-close-btn" data-close="modal-delete-central-account">&times;</button>
+      </div>
+      <form id="form-delete-central-account">
+        <input type="hidden" id="delete-central-id">
+        <div class="modal-body">
+          <p>Are you sure you want to delete <strong id="delete-central-name">-</strong>?</p>
+          <div id="delete-central-warning" class="alert alert-warning mt-3 small">
+            <strong>Safe Deletion Checks:</strong>
+            <ul style="margin: 4px 0 0 16px; padding: 0;">
+              <li>Accounts with assigned restaurants cannot be deleted.</li>
+              <li>Pending Central outbox messages block deletion.</li>
+              <li>Accounts with historical dispatch records are soft-deleted to preserve order history.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close="modal-delete-central-account">Cancel</button>
+          <button type="submit" class="btn btn-danger">Confirm Delete</button>
+        </div>
+      </form>
     </div>
   </div>
 

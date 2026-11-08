@@ -282,16 +282,29 @@ async function isTemplateApproved(templateName, {
   }
 
   // 3. CENTRAL Mode Handling: Strict independent template validation
-  // Step A: Check PostgreSQL active CentralWhatsAppAccount.templates
+  // Step A: Check PostgreSQL active CentralWhatsAppAccount.templates (restaurant assigned or global active)
   try {
-    const activeCentralAccount = await db.centralWhatsAppAccount.findFirst({
-      where: { is_active: true },
-      select: { templates: true, phone_number_id: true }
-    });
+    let targetCentralAccount = null;
+    if (restaurant && restaurant.central_account_id) {
+      targetCentralAccount = await db.centralWhatsAppAccount.findUnique({
+        where: { id: restaurant.central_account_id },
+        select: { templates: true, phone_number_id: true, is_active: true }
+      });
+      if (targetCentralAccount && !targetCentralAccount.is_active) {
+        targetCentralAccount = null;
+      }
+    }
 
-    if (activeCentralAccount && activeCentralAccount.templates) {
-      const dbTemplates = typeof activeCentralAccount.templates === 'object' && activeCentralAccount.templates !== null
-        ? activeCentralAccount.templates
+    if (!targetCentralAccount) {
+      targetCentralAccount = await db.centralWhatsAppAccount.findFirst({
+        where: { is_active: true, deleted_at: null },
+        select: { templates: true, phone_number_id: true }
+      });
+    }
+
+    if (targetCentralAccount && targetCentralAccount.templates) {
+      const dbTemplates = typeof targetCentralAccount.templates === 'object' && targetCentralAccount.templates !== null
+        ? targetCentralAccount.templates
         : {};
 
       const templateEntry = dbTemplates[templateName];
