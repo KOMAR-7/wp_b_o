@@ -894,6 +894,118 @@ async function isCentralPhoneNumberId(phoneNumberId, db = prisma) {
   return false;
 }
 
+/**
+ * Determines whether a given sender phone number string belongs to ANY active Central WhatsApp account.
+ * Inspects display_phone_number and phone_number_id across active database accounts,
+ * with defensive environment fallback.
+ *
+ * @param {string} senderPhone - E.164 or digits string (e.g. "919137361650", "+91 91373 61650")
+ * @param {Object} [db=prisma]
+ * @returns {Promise<boolean>}
+ */
+async function isCentralSenderPhone(senderPhone, db = prisma) {
+  if (!senderPhone || typeof senderPhone !== 'string') return false;
+  const cleanSender = senderPhone.replace(/[^\d]/g, '').trim();
+  if (!cleanSender) return false;
+
+  try {
+    const activeCentralAccounts = await db.centralWhatsAppAccount.findMany({
+      where: {
+        is_active: true,
+        deleted_at: null
+      },
+      select: {
+        phone_number_id: true,
+        display_phone_number: true
+      }
+    });
+
+    for (const acct of activeCentralAccounts) {
+      if (acct.display_phone_number) {
+        const cleanDisplay = acct.display_phone_number.replace(/[^\d]/g, '').trim();
+        if (cleanDisplay && (cleanDisplay === cleanSender || (cleanDisplay.length >= 10 && cleanSender.length >= 10 && cleanDisplay.slice(-10) === cleanSender.slice(-10)))) {
+          return true;
+        }
+      }
+      if (acct.phone_number_id) {
+        const cleanId = acct.phone_number_id.replace(/[^\d]/g, '').trim();
+        if (cleanId && cleanId === cleanSender) {
+          return true;
+        }
+      }
+    }
+  } catch (err) {
+    logger.warn('Failed to query Central WhatsApp accounts in isCentralSenderPhone', { error: err.message });
+  }
+
+  // Defensive environment fallback
+  const envCentralId = (config.central?.phoneNumberId || process.env.CENTRAL_PHONE_NUMBER_ID || '').replace(/[^\d]/g, '').trim();
+  if (envCentralId && envCentralId === cleanSender) {
+    return true;
+  }
+  const envDisplay = (process.env.CENTRAL_DISPLAY_PHONE_NUMBER || '').replace(/[^\d]/g, '').trim();
+  if (envDisplay) {
+    const cleanEnvDisplay = envDisplay.replace(/[^\d]/g, '').trim();
+    if (cleanEnvDisplay && (cleanEnvDisplay === cleanSender || (cleanEnvDisplay.length >= 10 && cleanSender.length >= 10 && cleanEnvDisplay.slice(-10) === cleanSender.slice(-10)))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Determines whether a given phone number belongs to ANY active restaurant tenant.
+ * Inspects phone_number_id, owner_phone, and contact_number across active restaurants.
+ *
+ * @param {string} phone
+ * @param {Object} [db=prisma]
+ * @returns {Promise<boolean>}
+ */
+async function isRestaurantPhoneNumber(phone, db = prisma) {
+  if (!phone || typeof phone !== 'string') return false;
+  const clean = phone.replace(/[^\d]/g, '').trim();
+  if (!clean) return false;
+
+  try {
+    const restaurants = await db.restaurant.findMany({
+      where: {
+        is_active: true
+      },
+      select: {
+        phone_number_id: true,
+        owner_phone: true,
+        contact_number: true
+      }
+    });
+
+    for (const r of restaurants) {
+      if (r.phone_number_id) {
+        const cleanPhoneId = r.phone_number_id.replace(/[^\d]/g, '').trim();
+        if (cleanPhoneId && cleanPhoneId === clean) {
+          return true;
+        }
+      }
+      if (r.owner_phone) {
+        const cleanOwner = r.owner_phone.replace(/[^\d]/g, '').trim();
+        if (cleanOwner && (cleanOwner === clean || (cleanOwner.length >= 10 && clean.length >= 10 && cleanOwner.slice(-10) === clean.slice(-10)))) {
+          return true;
+        }
+      }
+      if (r.contact_number) {
+        const cleanContact = r.contact_number.replace(/[^\d]/g, '').trim();
+        if (cleanContact && (cleanContact === clean || (cleanContact.length >= 10 && clean.length >= 10 && cleanContact.slice(-10) === clean.slice(-10)))) {
+          return true;
+        }
+      }
+    }
+  } catch (err) {
+    logger.warn('Failed to query restaurants in isRestaurantPhoneNumber', { error: err.message });
+  }
+
+  return false;
+}
+
 // -----------------------------------------------------------------------------
 // RESTAURANT MAPPING UTILITIES
 // -----------------------------------------------------------------------------
@@ -1095,7 +1207,7 @@ function setCentralSenderForTesting(senderFn) {
  * @param {Function} [params.customSender]
  * @returns {Promise<{success: boolean, error?: string}>}
  */
-async function handleCentralInformationalMessage({ senderPhone, messageId = null, customSender = null } = {}) {
+async function handleCentralInformationalMessage({ senderPhone, messageId = null, customSender = null, db = prisma } = {}) {
   if (!senderPhone || typeof senderPhone !== 'string') {
     return { success: false, error: 'INVALID_SENDER_PHONE' };
   }
@@ -1103,6 +1215,26 @@ async function handleCentralInformationalMessage({ senderPhone, messageId = null
   const cleanPhone = senderPhone.replace(/[^\d]/g, '').trim();
   if (!cleanPhone) {
     return { success: false, error: 'INVALID_SENDER_PHONE' };
+  }
+
+  // 1. Prevent informational auto-replies to restaurant tenant numbers
+  const isRestaurant = await isRestaurantPhoneNumber(cleanPhone, db);
+  if (isRestaurant) {
+    logger.info('Suppressed Central informational reply: recipient is a registered restaurant tenant number', {
+      recipientPhone: cleanPhone,
+      inboundMessageId: messageId
+    });
+    return { success: true, skipped: true, reason: 'RECIPIENT_IS_RESTAURANT_NUMBER' };
+  }
+
+  // 2. Prevent informational auto-replies to Central WhatsApp account numbers
+  const isCentral = await isCentralSenderPhone(cleanPhone, db);
+  if (isCentral) {
+    logger.info('Suppressed Central informational reply: recipient is a Central WhatsApp account number', {
+      recipientPhone: cleanPhone,
+      inboundMessageId: messageId
+    });
+    return { success: true, skipped: true, reason: 'RECIPIENT_IS_CENTRAL_NUMBER' };
   }
 
   try {
@@ -1186,6 +1318,8 @@ module.exports = {
   sanitizeCentralAccount,
   isValidTokenFormat,
   isCentralPhoneNumberId,
+  isCentralSenderPhone,
+  isRestaurantPhoneNumber,
   getActiveCentralPhoneIds,
   getAssignedRestaurants,
   getUnassignedRestaurants,

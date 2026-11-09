@@ -5,8 +5,7 @@
 const { verifyWebhookChallenge } = require('../middleware/verifyWebhook');
 const { parseWebhookPayload } = require('../parsers/webhook-parser');
 const { recordIncomingEvent, markEventCompleted, markEventFailed } = require('../services/webhook.service');
-const { resolveTenantByPhoneNumberId, isCentralPhoneNumberId } = require('../services/tenant.service');
-const { handleCentralInformationalMessage } = require('../services/central-whatsapp.service');
+const { resolveTenantByPhoneNumberId, isCentralPhoneNumberId, isCentralSenderPhone } = require('../services/tenant.service');
 const { handleIncomingMessage } = require('../services/conversation.service');
 const { processOwnerOrderDecision } = require('../services/order.service');
 const { enqueueConversationReply } = require('../services/outbox.service');
@@ -131,17 +130,13 @@ async function handleIncomingEvent(req, res) {
             continue;
           }
 
-          // Central webhook events must never accidentally enter the restaurant customer conversation engine.
-          // Handle unknown text messages received on XYZ with a safe informational response.
-          logger.info('Non-owner message received on Central WhatsApp number; returning informational response', {
+          // Central webhook events must never enter the restaurant customer conversation engine.
+          // Ordinary text messages received by Central must not trigger restaurant automation
+          // or automatic informational replies, preventing circular automated dispatch loops.
+          logger.info('Non-owner message received on Central WhatsApp number; acknowledged without customer automation or auto-reply', {
             phoneNumberId: event.phoneNumberId,
             senderPhone: event.senderPhone,
             messageType: event.messageType
-          });
-
-          await handleCentralInformationalMessage({
-            senderPhone: event.senderPhone,
-            messageId: event.messageId
           });
 
           if (eventRecord) {
@@ -158,6 +153,20 @@ async function handleIncomingEvent(req, res) {
           messageId: event.messageId,
           messageType: event.messageType
         });
+
+        // 1. ISOLATION GUARD: Identify whether incoming senderPhone belongs to an active Central WhatsApp account
+        const isSenderCentral = await isCentralSenderPhone(event.senderPhone);
+        if (isSenderCentral) {
+          logger.info('Inbound message from Central WhatsApp sender received on restaurant number; ignoring to isolate platform dispatch from customer automation', {
+            phoneNumberId: event.phoneNumberId,
+            senderPhone: event.senderPhone,
+            messageId: event.messageId
+          });
+          if (eventRecord) {
+            await markEventCompleted(eventRecord.id);
+          }
+          continue;
+        }
 
         // Resolve tenant context exclusively via Meta incoming phone_number_id
         const tenant = event.phoneNumberId
