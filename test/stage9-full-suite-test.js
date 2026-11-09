@@ -13,6 +13,7 @@ const http = require('http');
 const prisma = require('../src/config/database');
 const app = require('../src/app');
 const { hashPassword } = require('../src/utils/password');
+const { assertSafeTestAccount } = require('../src/utils/test-guard');
 const { decryptToken } = require('../src/utils/crypto');
 const { resolveTenantByPhoneNumberId } = require('../src/services/tenant.service');
 
@@ -97,6 +98,7 @@ async function runStage9FullSuiteTests() {
     // PREPARATION: Provision Test Super Admin
     // -------------------------------------------------------------
     const adminEmail = `full_admin_${Date.now()}@restopro.internal`;
+    assertSafeTestAccount(adminEmail, 'Stage 9 Full Suite Admin Creation');
     const adminPassword = 'AdminSecret987!';
     const passwordHash = await hashPassword(adminPassword);
 

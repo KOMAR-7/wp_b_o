@@ -17,6 +17,7 @@ const prisma = require('../src/config/database');
 const app = require('../src/app');
 const { hashPassword, verifyPassword } = require('../src/utils/password');
 const { resetRateLimiter } = require('../src/middleware/adminRateLimiter');
+const { assertSafeTestAccount } = require('../src/utils/test-guard');
 
 const TEST_PORT = 4996;
 let serverInstance;
@@ -125,6 +126,7 @@ async function runStage9Tests() {
     console.log('\n--- TEST GROUP 2: Super Admin Provisioning & Authentication ---');
 
     const testAdminEmail = `test_admin_${Date.now()}@restopro.internal`;
+    assertSafeTestAccount(testAdminEmail, 'Stage 9 Test Admin Creation');
     const testAdminPassword = 'StrongPassword987#';
     const testAdminHash = await hashPassword(testAdminPassword);
 
@@ -142,6 +144,7 @@ async function runStage9Tests() {
 
     // Create test inactive admin
     const inactiveAdminEmail = `inactive_admin_${Date.now()}@restopro.internal`;
+    assertSafeTestAccount(inactiveAdminEmail, 'Stage 9 Inactive Admin Creation');
     const inactiveAdmin = await prisma.adminUser.create({
       data: {
         name: 'Inactive Admin',
@@ -155,6 +158,7 @@ async function runStage9Tests() {
 
     // Create non-super-admin user (e.g. VIEWER)
     const viewerAdminEmail = `viewer_${Date.now()}@restopro.internal`;
+    assertSafeTestAccount(viewerAdminEmail, 'Stage 9 Viewer Admin Creation');
     const viewerAdmin = await prisma.adminUser.create({
       data: {
         name: 'Viewer User',

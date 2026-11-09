@@ -29,7 +29,8 @@ if (cleanupInterval.unref) {
  * Express middleware to enforce login rate limiting.
  */
 function adminLoginRateLimiter(req, res, next) {
-  const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+  const rawIp = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+  const clientIp = typeof rawIp === 'string' ? rawIp.split(',')[0].trim() : 'unknown';
   const now = Date.now();
 
   const record = attemptsStore.get(clientIp);

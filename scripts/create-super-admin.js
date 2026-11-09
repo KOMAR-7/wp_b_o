@@ -96,8 +96,10 @@ async function main() {
     });
 
     if (existing) {
-      console.error(`❌ Error: An admin account with email "${normalizedEmail}" already exists.`);
-      console.error('   Bootstrap script will NOT overwrite existing accounts. Aborting.');
+      console.error(`\n❌ Administrator account "${normalizedEmail}" already exists.`);
+      console.error('To securely recover or reset the password for an existing administrator without leaking');
+      console.error('credentials in command history, please use the interactive recovery utility:');
+      console.error('   node scripts/reset-admin-password.js\n');
       process.exit(1);
     }
 

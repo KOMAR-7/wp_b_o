@@ -9,6 +9,7 @@
   // Application State
   const state = {
     user: null,
+    token: null,
     currentTab: 'dashboard',
     restaurants: { page: 1, limit: 10, search: '', status: '' },
     subscriptions: { page: 1, limit: 10, search: '', status: '', restaurant_id: '' },
@@ -91,6 +92,12 @@
       }
     };
 
+    // In-memory token fallback for active tab API calls if available
+    if (state.token) {
+      opts.headers['Authorization'] = `Bearer ${state.token}`;
+      opts.headers['X-Admin-Token'] = state.token;
+    }
+
     if (opts.body && typeof opts.body === 'object' && !(opts.body instanceof FormData)) {
       opts.headers['Content-Type'] = 'application/json';
       opts.body = JSON.stringify(opts.body);
@@ -106,6 +113,8 @@
           showToast('Session expired. Please log in again.', 'error');
         }
         state.user = null;
+        state.token = null;
+        try { sessionStorage.removeItem('admin_token'); } catch (_) {}
         showView('login');
         throw new Error(data.error || 'Authentication required');
       }
@@ -204,6 +213,9 @@
         switchTab(initialHash);
       }
     } catch (_) {
+      state.user = null;
+      state.token = null;
+      try { sessionStorage.removeItem('admin_token'); } catch (_) {}
       showView('login');
     }
   }
@@ -226,6 +238,9 @@
 
       if (res && res.success) {
         state.user = res.admin;
+        state.token = res.token || null;
+        // Purge any storage token to ensure strict reliance on HttpOnly, SameSite cookies
+        try { sessionStorage.removeItem('admin_token'); } catch (_) {}
         document.getElementById('header-admin-name').textContent = res.admin.name;
         document.getElementById('header-admin-email').textContent = res.admin.email;
         showView('app');
@@ -247,6 +262,8 @@
       // Continue cleanup on client
     }
     state.user = null;
+    state.token = null;
+    try { sessionStorage.removeItem('admin_token'); } catch (_) {}
     showView('login');
     showToast('Logged out successfully', 'info');
   }

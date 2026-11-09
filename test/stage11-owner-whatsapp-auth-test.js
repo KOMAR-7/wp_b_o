@@ -17,6 +17,7 @@ const http = require('http');
 const prisma = require('../src/config/database');
 const app = require('../src/app');
 const { hashPassword } = require('../src/utils/password');
+const { assertSafeTestAccount } = require('../src/utils/test-guard');
 const { encryptToken, decryptToken, getPrimaryEncryptionKey } = require('../src/utils/crypto');
 const { generateSignedOwnerCallback, verifySignedOwnerCallback } = require('../src/utils/callback-signer');
 const {
@@ -126,6 +127,7 @@ async function runStage11Tests() {
     // SETUP: Provision Test Super Admin
     // -------------------------------------------------------------
     const adminEmail = `stage11_admin_${Date.now()}@restopro.internal`;
+    assertSafeTestAccount(adminEmail, 'Stage 11 Admin Setup');
     const adminPassword = 'SuperSecret123!';
     const passwordHash = await hashPassword(adminPassword);
 

@@ -18,6 +18,7 @@ const crypto = require('crypto');
 const app = require('../src/app');
 const prisma = require('../src/config/database');
 const { hashPassword } = require('../src/utils/password');
+const { assertSafeTestAccount } = require('../src/utils/test-guard');
 const { decryptToken } = require('../src/utils/crypto');
 
 const TEST_PORT = 4991;
@@ -111,7 +112,9 @@ async function runTestSuite() {
     // -------------------------------------------------------------
     const superAdminEmail = `super_admin_${Date.now()}@restopro.internal`;
     const staffAdminEmail = `staff_admin_${Date.now()}@restopro.internal`;
-    const password = 'SuperSecretPassword123!';
+    assertSafeTestAccount(superAdminEmail, 'Central Admin Test Suite Setup');
+    assertSafeTestAccount(staffAdminEmail, 'Central Admin Test Suite Setup');
+    const password = `CentralApiTestSecret_${crypto.randomBytes(8).toString('hex')}!`;
     const passwordHash = await hashPassword(password);
 
     const superAdmin = await prisma.adminUser.create({

@@ -16,6 +16,7 @@ const app = require('../src/app');
 const prisma = require('../src/config/database');
 const config = require('../src/config/env');
 const { hashPassword } = require('../src/utils/password');
+const { assertSafeTestAccount } = require('../src/utils/test-guard');
 const { decryptToken } = require('../src/utils/crypto');
 const { generateSignedOwnerCallback } = require('../src/utils/callback-signer');
 const {
@@ -122,7 +123,8 @@ async function runR68TestSuite() {
     });
 
     const superAdminEmail = `super_admin_r68_${Date.now()}@restopro.internal`;
-    const password = 'SuperSecretPassword123!';
+    assertSafeTestAccount(superAdminEmail, 'R6.8 Test Suite Setup');
+    const password = `R68TestSecret_${crypto.randomBytes(8).toString('hex')}!`;
     const passwordHash = await hashPassword(password);
 
     const superAdmin = await prisma.adminUser.create({

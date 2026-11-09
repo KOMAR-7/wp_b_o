@@ -35,7 +35,7 @@ async function handleAdminLogin(req, res) {
     res.cookie('admin_session', token, {
       httpOnly: true,
       secure: isProduction,
-      sameSite: 'strict',
+      sameSite: 'lax',
       maxAge: 8 * 60 * 60 * 1000, // 8 hours
       path: '/'
     });
