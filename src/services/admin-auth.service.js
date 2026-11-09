@@ -42,15 +42,22 @@ function hashToken(token) {
 
 /**
  * Authenticates a Super Admin with email and password.
- * @param {Object} credentials - { email, password, ipAddress, userAgent }
+ * @param {Object} credentials - { email, password, ipAddress, userAgent, host, referer }
  * @returns {Promise<Object>} { token, admin }
  */
-async function loginAdmin({ email, password, ipAddress, userAgent }) {
+async function loginAdmin({ email, password, ipAddress, userAgent, host, referer }) {
   if (!email || typeof email !== 'string' || !password || typeof password !== 'string') {
     const err = new Error('Invalid email or password');
     err.statusCode = 400;
     throw err;
   }
+
+  const clientMetadata = {
+    ipAddress: ipAddress || null,
+    userAgent: userAgent ? userAgent.substring(0, 200) : null,
+    host: host ? String(host).substring(0, 100) : null,
+    referer: referer ? String(referer).substring(0, 200) : null
+  };
 
   const normalizedEmail = email.trim().toLowerCase();
 
@@ -70,7 +77,7 @@ async function loginAdmin({ email, password, ipAddress, userAgent }) {
           metadata: {
             reason: 'USER_NOT_FOUND',
             attemptedEmail: normalizedEmail,
-            ipAddress
+            ...clientMetadata
           }
         }
       });
@@ -94,7 +101,7 @@ async function loginAdmin({ email, password, ipAddress, userAgent }) {
           entity_id: admin.id,
           metadata: {
             reason: 'ACCOUNT_DEACTIVATED',
-            ipAddress
+            ...clientMetadata
           }
         }
       });
@@ -118,7 +125,7 @@ async function loginAdmin({ email, password, ipAddress, userAgent }) {
           entity_id: admin.id,
           metadata: {
             reason: 'INSUFFICIENT_ROLE',
-            ipAddress
+            ...clientMetadata
           }
         }
       });
@@ -143,7 +150,7 @@ async function loginAdmin({ email, password, ipAddress, userAgent }) {
           entity_id: admin.id,
           metadata: {
             reason: 'INVALID_PASSWORD',
-            ipAddress
+            ...clientMetadata
           }
         }
       });
@@ -182,10 +189,7 @@ async function loginAdmin({ email, password, ipAddress, userAgent }) {
         action: 'ADMIN_LOGIN_SUCCESS',
         entity_type: 'AdminUser',
         entity_id: admin.id,
-        metadata: {
-          ipAddress,
-          userAgent: userAgent ? userAgent.substring(0, 200) : null
-        }
+        metadata: clientMetadata
       }
     })
   ]);

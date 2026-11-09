@@ -20,14 +20,21 @@ async function handleAdminLogin(req, res) {
       });
     }
 
-    const ipAddress = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    const ipAddress = req.headers['cf-connecting-ip'] ||
+      (req.headers['x-forwarded-for'] ? req.headers['x-forwarded-for'].split(',')[0].trim() : null) ||
+      req.ip ||
+      req.socket.remoteAddress;
     const userAgent = req.headers['user-agent'];
+    const host = req.headers['host'];
+    const referer = req.headers['referer'] || req.headers['origin'];
 
     const { token, admin } = await loginAdmin({
       email,
       password,
       ipAddress,
-      userAgent
+      userAgent,
+      host,
+      referer
     });
 
     // Set secure HTTP-only cookie
@@ -67,7 +74,13 @@ async function handleAdminLogout(req, res) {
       await logoutAdmin(token);
     }
 
-    res.clearCookie('admin_session', { path: '/' });
+    const isProduction = process.env.NODE_ENV === 'production';
+    res.clearCookie('admin_session', {
+      path: '/',
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: 'lax'
+    });
 
     return res.status(200).json({
       success: true,
