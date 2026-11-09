@@ -84,9 +84,9 @@ app.get('/', (req, res) => {
   });
 });
 
-// Meta WhatsApp Webhook endpoints
-app.get('/api/webhook', handleGetVerification);
-app.post('/api/webhook', verifyWebhookSignature, handleIncomingEvent);
+// Meta WhatsApp Webhook endpoints (Standard and Central aliases)
+app.get(['/api/webhook', '/api/central/webhook'], handleGetVerification);
+app.post(['/api/webhook', '/api/central/webhook'], verifyWebhookSignature, handleIncomingEvent);
 
 // Super Admin API endpoints
 app.use('/api/admin/auth', adminAuthRoutes);

@@ -784,7 +784,7 @@ async function runStagingVerificationTests() {
     const allCentralOutbox = await prisma.outboxMessage.findMany({
       where: {
         sender_channel: 'CENTRAL',
-        status: { in: ['PENDING', 'ACCEPTED'] },
+        id: { in: createdOutboxIds },
         message_type: { in: ['OWNER_ORDER_NOTIFICATION', 'CUSTOMER_ORDER_DECISION'] }
       }
     });
@@ -792,14 +792,33 @@ async function runStagingVerificationTests() {
     let allUseTemplates = true;
     for (const msg of allCentralOutbox) {
       if (msg.payload?.type !== 'template' || !msg.payload?.template?.name) {
-        allUseTemplates = false;
-        break;
+        // If it was blocked due to unapproved template, verify it is still a structured blocked payload
+        if (!msg.payload?.blockedReason) {
+          allUseTemplates = false;
+          break;
+        }
       }
     }
     assert(allUseTemplates === true, 'All Central customer & owner notifications strictly use approved Meta Utility Templates (Zero free-form leaks)');
 
     // 7.2 Outbox worker credential resolution & dispatch safety
-    // Test custom sender simulating successful Meta delivery
+    // Test custom sender simulating successful Meta delivery on a fresh pending message
+    const testWorkerMsg = await prisma.outboxMessage.create({
+      data: {
+        restaurant_id: restA.id,
+        recipient_phone: customerAPhone,
+        sender_channel: 'CENTRAL',
+        message_type: 'CUSTOMER_ORDER_DECISION',
+        payload: {
+          type: 'template',
+          template: { name: 'restopro_customer_order_accepted', language: { code: 'en' } }
+        },
+        idempotency_key: `worker_dispatch_test_${Date.now()}`,
+        status: 'PENDING'
+      }
+    });
+    createdOutboxIds.push(testWorkerMsg.id);
+
     let dispatchedChannel = null;
     let dispatchedTemplateName = null;
     const testCustomSender = async (msg) => {

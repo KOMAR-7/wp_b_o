@@ -168,17 +168,19 @@ async function handleGetCentralAccount(req, res) {
 async function processAccountCreation(req, res, { enforceSingleActive = false }) {
   try {
     const adminId = req.admin ? req.admin.id : null;
-    const {
-      accountName,
-      description,
-      phoneNumberId,
-      wabaId,
-      accessToken,
-      displayPhoneNumber,
-      isActive = true,
-      deactivatePrevious = false,
-      templates = {}
-    } = req.body || {};
+    const body = req.body || {};
+    const accountName = body.accountName ?? body.account_name;
+    const description = body.description;
+    const phoneNumberId = body.phoneNumberId ?? body.phone_number_id;
+    const wabaId = body.wabaId ?? body.waba_id;
+    let accessToken = body.accessToken ?? body.access_token;
+    if (typeof accessToken === 'string') {
+      accessToken = accessToken.trim().replace(/^["']|["']$/g, '').trim();
+    }
+    const displayPhoneNumber = body.displayPhoneNumber ?? body.display_phone_number;
+    const isActive = body.isActive !== undefined ? body.isActive : (body.is_active !== undefined ? Boolean(body.is_active) : true);
+    const deactivatePrevious = body.deactivatePrevious !== undefined ? body.deactivatePrevious : (body.deactivate_previous !== undefined ? Boolean(body.deactivate_previous) : false);
+    const templates = body.templates || {};
 
     if (!phoneNumberId || typeof phoneNumberId !== 'string' || !phoneNumberId.trim()) {
       return res.status(400).json({ success: false, error: 'Missing required field: phoneNumberId' });

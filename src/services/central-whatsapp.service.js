@@ -22,7 +22,7 @@ const { verifyMetaWhatsAppToken } = require('./whatsapp.service');
  */
 function isValidTokenFormat(token) {
   if (!token || typeof token !== 'string') return false;
-  const trimmed = token.trim();
+  const trimmed = token.trim().replace(/^["']|["']$/g, '');
   return (
     trimmed.startsWith('EAA') ||
     trimmed.startsWith('mock_') ||
@@ -202,7 +202,7 @@ async function createCentralAccount({
     throw err;
   }
 
-  const cleanToken = accessToken.trim();
+  const cleanToken = accessToken.trim().replace(/^["']|["']$/g, '');
   if (!isValidTokenFormat(cleanToken)) {
     logger.warn('Central access token rejected: missing required EAA prefix', {
       phoneNumberId: phoneNumberId.trim()
@@ -508,7 +508,7 @@ async function updateCentralAccount(id, data, db = prisma) {
   }
 
   if (data.accessToken !== undefined && data.accessToken !== null) {
-    const cleanToken = String(data.accessToken).trim();
+    const cleanToken = String(data.accessToken).trim().replace(/^["']|["']$/g, '');
     if (cleanToken.length > 0) {
       if (!isValidTokenFormat(cleanToken)) {
         const err = new Error('[CENTRAL ACCOUNT ERROR] Invalid WhatsApp access token format. Access tokens must begin with "EAA".');

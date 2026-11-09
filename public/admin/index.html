@@ -1069,41 +1069,41 @@
           <div class="form-row">
             <div class="form-group col-6">
               <label>Account Name *</label>
-              <input type="text" name="account_name" class="form-control" required placeholder="e.g. Central Dispatch North">
+              <input type="text" id="create-central-name" name="account_name" class="form-control" required placeholder="e.g. Central Dispatch North">
             </div>
             <div class="form-group col-6">
               <label>Display Phone Number</label>
-              <input type="text" name="display_phone_number" class="form-control" placeholder="+91 98765 00000">
+              <input type="text" id="create-central-display" name="display_phone_number" class="form-control" placeholder="+91 98765 00000">
             </div>
           </div>
 
           <div class="form-row">
             <div class="form-group col-6">
               <label>Meta Phone Number ID *</label>
-              <input type="text" name="phone_number_id" class="form-control" required placeholder="e.g. 109283019283019">
+              <input type="text" id="create-central-phoneid" name="phone_number_id" class="form-control" required placeholder="e.g. 109283019283019">
               <small class="form-hint">Unique Meta Phone ID for this dispatch line</small>
             </div>
             <div class="form-group col-6">
               <label>Meta WABA ID *</label>
-              <input type="text" name="waba_id" class="form-control" required placeholder="e.g. 293840293840293">
+              <input type="text" id="create-central-wabaid" name="waba_id" class="form-control" required placeholder="e.g. 293840293840293">
               <small class="form-hint">WhatsApp Business Account ID</small>
             </div>
           </div>
 
           <div class="form-group">
             <label>Permanent System User Access Token *</label>
-            <input type="password" name="access_token" autocomplete="new-password" class="form-control" required placeholder="EAAB... (Encrypted with AES-256-GCM)">
+            <input type="password" id="create-central-token" name="access_token" autocomplete="new-password" class="form-control" required placeholder="EAAB... (Encrypted with AES-256-GCM)">
             <small class="form-hint">Stored encrypted. Never returned in GET responses or client logs.</small>
           </div>
 
           <div class="form-group">
             <label>Description / Administrative Notes</label>
-            <textarea name="description" class="form-control" rows="2" placeholder="e.g. Central line for North Zone restaurants"></textarea>
+            <textarea id="create-central-description" name="description" class="form-control" rows="2" placeholder="e.g. Central line for North Zone restaurants"></textarea>
           </div>
 
           <div class="form-group">
             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-              <input type="checkbox" name="is_active" value="true" checked>
+              <input type="checkbox" id="create-central-active" name="is_active" value="true" checked>
               <span><strong>Account Active immediately</strong></span>
             </label>
             <small class="form-hint">If active, this account can be assigned to restaurants for notification routing.</small>
@@ -1111,7 +1111,7 @@
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-outline" data-close="modal-create-central-account">Cancel</button>
-          <button type="submit" class="btn btn-primary">Save & Register</button>
+          <button type="submit" id="create-central-submit-btn" class="btn btn-primary">Save & Register</button>
         </div>
       </form>
     </div>
@@ -1296,7 +1296,7 @@
     </div>
   </div>
 
-  <script src="/admin/app.js"></script>
+  <script src="/admin/app.js?v=20261109_r6821"></script>
 </body>
 </html>
 

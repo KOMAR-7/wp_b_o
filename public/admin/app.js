@@ -1290,20 +1290,87 @@
     if (formCreateCentral) {
       formCreateCentral.addEventListener('submit', async (e) => {
         e.preventDefault();
+        const submitBtn = document.getElementById('create-central-submit-btn') || formCreateCentral.querySelector('button[type="submit"]');
+
         const formData = new FormData(e.target);
-        const payload = Object.fromEntries(formData.entries());
-        payload.isActive = Boolean(payload.is_active);
+        const raw = Object.fromEntries(formData.entries());
+
+        const nameInput = document.getElementById('create-central-name');
+        const displayInput = document.getElementById('create-central-display');
+        const phoneInput = document.getElementById('create-central-phoneid');
+        const wabaInput = document.getElementById('create-central-wabaid');
+        const tokenInput = document.getElementById('create-central-token');
+        const descInput = document.getElementById('create-central-description');
+        const activeInput = document.getElementById('create-central-active');
+
+        const accountName = (nameInput ? nameInput.value : (raw.account_name || '')).trim();
+        const displayPhoneNumber = (displayInput ? displayInput.value : (raw.display_phone_number || '')).trim() || null;
+        const phoneNumberId = (phoneInput ? phoneInput.value : (raw.phone_number_id || '')).trim();
+        const wabaId = (wabaInput ? wabaInput.value : (raw.waba_id || '')).trim();
+        let accessToken = (tokenInput ? tokenInput.value : (raw.access_token || '')).trim();
+        // Strip enclosing quotes if user accidentally pasted them
+        accessToken = accessToken.replace(/^["']|["']$/g, '').trim();
+        const description = (descInput ? descInput.value : (raw.description || '')).trim() || null;
+        const isActive = activeInput ? activeInput.checked : (raw.is_active === 'true' || raw.is_active === true || raw.is_active === 'on');
+
+        if (!accountName) {
+          showToast('Account name is required', 'error');
+          return;
+        }
+        if (!phoneNumberId) {
+          showToast('Meta Phone Number ID is required', 'error');
+          return;
+        }
+        if (!wabaId) {
+          showToast('Meta WABA ID is required', 'error');
+          return;
+        }
+        if (!accessToken) {
+          showToast('System user access token is required', 'error');
+          return;
+        }
+        if (!accessToken.startsWith('EAA') && !accessToken.startsWith('mock_')) {
+          showToast('Invalid Meta token format: Access tokens must begin with "EAA"', 'error');
+          return;
+        }
+
+        const payload = {
+          accountName,
+          account_name: accountName,
+          displayPhoneNumber,
+          display_phone_number: displayPhoneNumber,
+          phoneNumberId,
+          phone_number_id: phoneNumberId,
+          wabaId,
+          waba_id: wabaId,
+          accessToken,
+          access_token: accessToken,
+          description,
+          isActive,
+          is_active: isActive
+        };
+
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.textContent = 'Saving...';
+        }
 
         try {
           await apiCall('/api/admin/central-accounts', {
             method: 'POST',
             body: payload
           });
+          e.target.reset();
           closeModal('modal-create-central-account');
           showToast('Central WhatsApp account registered successfully!', 'success');
-          loadCentralAccounts();
+          await loadCentralAccounts();
         } catch (err) {
           showToast(`Failed to register account: ${err.message}`, 'error');
+        } finally {
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Save & Register';
+          }
         }
       });
     }
@@ -1320,8 +1387,13 @@
           wabaId: document.getElementById('edit-central-wabaid').value.trim(),
           description: document.getElementById('edit-central-description').value.trim() || null
         };
-        const token = document.getElementById('edit-central-token').value.trim();
+        let token = document.getElementById('edit-central-token').value.trim();
+        token = token.replace(/^["']|["']$/g, '').trim();
         if (token) {
+          if (!token.startsWith('EAA') && !token.startsWith('mock_')) {
+            showToast('Invalid Meta token format: Access tokens must begin with "EAA"', 'error');
+            return;
+          }
           payload.accessToken = token;
         }
 
