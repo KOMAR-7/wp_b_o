@@ -286,7 +286,8 @@ async function runR6TestSuite() {
       });
 
       const templateBodyComponent = ownerPayloadTemplate.template.components.find(c => c.type === 'body');
-      const itemsSummaryParam = templateBodyComponent.parameters[2];
+      assert.strictEqual(templateBodyComponent.parameters.length, 6, 'Template must have 6 parameters');
+      const itemsSummaryParam = templateBodyComponent.parameters[4];
       assert.strictEqual(
         itemsSummaryParam.text.includes('Chicken Dum Biryani (Special)'),
         true,

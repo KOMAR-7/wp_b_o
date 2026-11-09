@@ -253,17 +253,16 @@ async function runSuite() {
       'Recipient phone must match restaurant owner phone'
     );
     
-    // 4. Verify all required fields in Central payload
+    // 4. Verify all required fields in Central payload (6-parameter Meta template)
     const tmplComponents = ownerOutboxCentral.payload?.template?.components || [];
     const bodyComp = tmplComponents.find(c => c.type === 'body');
-    assert(bodyComp && bodyComp.parameters.length >= 5, 'Template body must have at least 5 parameters');
-    const paramTexts = bodyComp.parameters.map(p => p.text);
-    assert(paramTexts.some(t => t.includes(restA.name)), 'Must contain restaurant name');
-    assert(paramTexts.some(t => t.includes(order1.order_reference)), 'Must contain order reference ID');
-    assert(paramTexts.some(t => t.includes('Chicken Dum Biryani')), 'Must contain ordered items & quantities');
-    assert(paramTexts.some(t => t.includes('500.00')), 'Must contain total amount');
-    assert(paramTexts.some(t => t.includes('Madi') && t.includes(CUSTOMER_PQR)), 'Must contain customer name & phone');
-    assert(paramTexts.some(t => t.includes('42 Baker Street')), 'Must contain delivery address');
+    assert(bodyComp && bodyComp.parameters.length === 6, 'Template body must have exactly 6 parameters');
+    assert.strictEqual(bodyComp.parameters[0].text, 'Madi', 'Parameter 1 must be Customer Name');
+    assert(bodyComp.parameters[1].text.includes(CUSTOMER_PQR), 'Parameter 2 must be Customer Phone');
+    assert.strictEqual(bodyComp.parameters[2].text, 'Delivery', 'Parameter 3 must be Order Type');
+    assert(bodyComp.parameters[3].text.includes('42 Baker Street'), 'Parameter 4 must contain Delivery Address');
+    assert(bodyComp.parameters[4].text.includes('Chicken Dum Biryani'), 'Parameter 5 must contain ordered items & quantities');
+    assert(bodyComp.parameters[5].text.includes('500.00') && bodyComp.parameters[5].text.includes('COD'), 'Parameter 6 must contain total amount and payment method');
 
     // Verify Accept and Reject buttons exist with signed HMAC callbacks
     const btnComponents = tmplComponents.filter(c => c.type === 'button');

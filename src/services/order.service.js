@@ -22,7 +22,7 @@ const {
 } = require('./whatsapp.service');
 const { getOwnerConsent, parseInternalNotes } = require('./admin-restaurant.service');
 const { verifySignedOwnerCallback } = require('../utils/callback-signer');
-const { isTemplateApproved } = require('./template-config.service');
+const { isTemplateApproved, SUPPORTED_TEMPLATES } = require('./template-config.service');
 
 // Characters for human-friendly, uppercase alphanumeric references (excludes ambiguous 0/O, 1/I)
 const REFERENCE_CHARACTERS = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -464,7 +464,8 @@ async function confirmCustomerOrder({
     if (hasConsent) {
       // CENTRAL routing mode: Owner order alert MUST originate from Central WhatsApp (XYZ).
       // Never send the owner order confirmation request from restaurant number ABC.
-      const alertCheck = await isTemplateApproved('restopro_order_alert', {
+      const alertTemplateName = SUPPORTED_TEMPLATES.ORDER_ALERT;
+      const alertCheck = await isTemplateApproved(alertTemplateName, {
         db: tx,
         restaurant,
         routingMode: 'CENTRAL'
@@ -476,7 +477,7 @@ async function confirmCustomerOrder({
           order: createdOrder,
           restaurantName: restaurant.name,
           useTemplate: true,
-          templateName: 'restopro_order_alert'
+          templateName: alertTemplateName
         });
 
         createdOutboxMessage = await tx.outboxMessage.create({
@@ -497,7 +498,7 @@ async function confirmCustomerOrder({
             restaurant_id: restaurantId,
             recipient_phone: rawOwnerPhone.trim(),
             notification_type: 'OWNER_ORDER_ALERT',
-            template_name: 'restopro_order_alert',
+            template_name: alertTemplateName,
             delivery_status: 'PENDING'
           }
         });
@@ -517,7 +518,7 @@ async function confirmCustomerOrder({
             },
             idempotency_key: `owner_notif_${createdOrder.id}`,
             status: 'FAILED',
-            last_error: 'BLOCKED_TEMPLATE_NOT_CONFIGURED: Central WhatsApp requires approved Meta Utility Template restopro_order_alert'
+            last_error: `BLOCKED_TEMPLATE_NOT_CONFIGURED: Central WhatsApp requires approved Meta Utility Template ${alertTemplateName}`
           }
         });
 
@@ -527,9 +528,9 @@ async function confirmCustomerOrder({
             restaurant_id: restaurantId,
             recipient_phone: rawOwnerPhone.trim(),
             notification_type: 'OWNER_ORDER_ALERT',
-            template_name: 'restopro_order_alert',
+            template_name: alertTemplateName,
             delivery_status: 'FAILED',
-            error_message: 'BLOCKED_TEMPLATE_NOT_CONFIGURED: Central WhatsApp requires approved Meta Utility Template restopro_order_alert'
+            error_message: `BLOCKED_TEMPLATE_NOT_CONFIGURED: Central WhatsApp requires approved Meta Utility Template ${alertTemplateName}`
           }
         });
 

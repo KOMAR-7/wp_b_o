@@ -27,7 +27,7 @@ const DEFAULT_TIMEOUT_MS = 10000;
  * @param {Object} params.order - Created order record
  * @param {string} [params.restaurantName] - Commercial restaurant name
  * @param {boolean} [params.useTemplate=false] - Whether to format as approved Meta message template
- * @param {string} [params.templateName='restopro_order_alert'] - Meta approved template name
+ * @param {string} [params.templateName] - Meta approved template name (defaults to configured env or restopro_order_alert)
  * @returns {Object} WhatsApp Cloud API payload
  */
 function buildOwnerNotificationPayload({
@@ -35,7 +35,7 @@ function buildOwnerNotificationPayload({
   order,
   restaurantName = '',
   useTemplate = false,
-  templateName = 'restopro_order_alert'
+  templateName = process.env.ORDER_ALERT_TEMPLATE_NAME || process.env.META_ORDER_ALERT_TEMPLATE || 'restopro_order_alert'
 }) {
   if (!ownerPhone || typeof ownerPhone !== 'string') {
     throw new Error('[WHATSAPP PAYLOAD ERROR] Missing ownerPhone.');
@@ -49,7 +49,7 @@ function buildOwnerNotificationPayload({
   const cleanPhone = ownerPhone.replace(/[^\d]/g, '');
 
   const items = Array.isArray(order.items) ? order.items : [];
-  const currencySymbol = order.currency === 'INR' ? '₹' : `${order.currency} `;
+  const currencySymbol = (!order.currency || order.currency === 'INR') ? '₹' : `${order.currency} `;
 
   const total = typeof order.total_amount === 'object' && order.total_amount !== null
     ? Number(order.total_amount).toFixed(2)
@@ -67,37 +67,62 @@ function buildOwnerNotificationPayload({
     throw new Error(`[WHATSAPP PAYLOAD ERROR] Reject button payload exceeds Meta limit of 128 characters (${rejectCallback.length} chars).`);
   }
 
-  // Items compact summary for template body
-  const itemsSummary = items
-    .map(item => `${item.quantity || 1}x ${item.productName || item.name || 'Item'}`)
-    .join(', ') || 'Order Items';
+  // 1. Customer Name {{1}}
+  const customerName = (order.customer_name && String(order.customer_name).trim()) || 'Customer';
 
-  const custName = order.customer_name || 'Customer';
-  const custPhone = order.customer_phone || '';
-  const addr = (order.order_type === 'DELIVERY' && order.address_snapshot) ? ` to ${order.address_snapshot}` : '';
-  const fulfilmentText = order.order_type === 'DELIVERY'
-    ? `Delivery${addr} (Customer: ${custName}, ${custPhone})`.slice(0, 1024)
-    : `Takeaway (Self-Pickup) (Customer: ${custName}, ${custPhone})`.slice(0, 1024);
+  // 2. Customer Phone {{2}}
+  const customerPhone = (order.customer_phone && String(order.customer_phone).trim()) || 'N/A';
+
+  // 3. Order Type {{3}}
+  const isDelivery = order.order_type === 'DELIVERY';
+  const orderType = isDelivery ? 'Delivery' : 'Takeaway (Self-Pickup)';
+
+  // 4. Delivery Address {{4}}
+  const deliveryAddress = (isDelivery && order.address_snapshot && String(order.address_snapshot).trim())
+    ? String(order.address_snapshot).trim().slice(0, 1024)
+    : (isDelivery ? 'Address not provided' : 'Takeaway (Self-Pickup)');
+
+  // 5. Formatted Items (dynamic, supporting multiple items) {{5}}
+  const formattedItems = items.length > 0
+    ? items.map(item => {
+        const qty = item.quantity || 1;
+        const name = item.productName || item.name || item.title || item.productRetailerId || 'Item';
+        return `${qty}x ${name}`;
+      }).join('\n').slice(0, 1024)
+    : '1x Order Items';
+
+  // 6. Total Payable Amount including payment method {{6}}
+  let paymentTag = '(Pay COD)';
+  if (order.payment_method && typeof order.payment_method === 'string' && order.payment_method.trim()) {
+    paymentTag = `(Pay ${order.payment_method.trim().toUpperCase()})`;
+  } else if (!isDelivery) {
+    paymentTag = '(Pay at Counter)';
+  } else {
+    paymentTag = '(Pay COD)';
+  }
+  const totalWithPayment = `${currencySymbol}${total} ${paymentTag}`;
 
   // If outside 24h window or explicitly requested: use approved Meta Utility Template format
   if (useTemplate) {
+    const resolvedTemplateName = templateName || process.env.ORDER_ALERT_TEMPLATE_NAME || process.env.META_ORDER_ALERT_TEMPLATE || 'restopro_order_alert';
     return {
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
       to: cleanPhone,
       type: 'template',
       template: {
-        name: templateName || 'restopro_order_alert',
+        name: resolvedTemplateName,
         language: { code: 'en' },
         components: [
           {
             type: 'body',
             parameters: [
-              { type: 'text', text: restaurantName || 'Restaurant' },
-              { type: 'text', text: `#${order.order_reference}` },
-              { type: 'text', text: itemsSummary.slice(0, 1024) },
-              { type: 'text', text: `${currencySymbol}${total}` },
-              { type: 'text', text: fulfilmentText }
+              { type: 'text', text: customerName.slice(0, 1024) },
+              { type: 'text', text: customerPhone.slice(0, 1024) },
+              { type: 'text', text: orderType.slice(0, 1024) },
+              { type: 'text', text: deliveryAddress.slice(0, 1024) },
+              { type: 'text', text: formattedItems.slice(0, 1024) },
+              { type: 'text', text: totalWithPayment.slice(0, 1024) }
             ]
           },
           {
@@ -117,26 +142,28 @@ function buildOwnerNotificationPayload({
     };
   }
 
-  let bodyText = `🔔 *NEW ORDER: #${order.order_reference}*\n`;
-  bodyText += '━━━━━━━━━━━━━━━━━━━━\n';
-  bodyText += `👤 *Customer:* ${order.customer_name || 'Customer'} (${order.customer_phone})\n`;
-  bodyText += `🥡 *Fulfilment:* ${order.order_type === 'DELIVERY' ? '🚚 Delivery' : '🥡 Takeaway (Self-Pickup)'}\n`;
+  const formattedInteractiveItems = items.length > 0
+    ? items.map(item => {
+        const qty = item.quantity || 1;
+        const name = item.productName || item.name || item.title || item.productRetailerId || 'Item';
+        const priceStr = (typeof item.unitPrice === 'number' || (typeof item.unitPrice === 'string' && item.unitPrice))
+          ? ` @ ${currencySymbol}${Number(item.unitPrice).toFixed(2)}`
+          : '';
+        return `• ${qty}x ${name}${priceStr}`;
+      }).join('\n')
+    : formattedItems;
 
-  if (order.order_type === 'DELIVERY' && order.address_snapshot) {
-    bodyText += `📍 *Address:* ${order.address_snapshot}\n`;
-  }
-
+  let bodyText = `🍽️ *New Order Received!*\n`;
   bodyText += '━━━━━━━━━━━━━━━━━━━━\n';
-  bodyText += '*Items:*\n';
-  for (const item of items) {
-    const unitPrice = typeof item.unitPrice === 'number' ? item.unitPrice.toFixed(2) : item.unitPrice;
-    bodyText += `• ${item.quantity}x ${item.productName || item.productRetailerId} @ ${currencySymbol}${unitPrice}\n`;
-  }
-
+  bodyText += `👤 *Customer:* ${customerName}\n`;
+  bodyText += `📞 *Phone:* ${customerPhone}\n`;
+  bodyText += `📦 *Order Type:* ${orderType}\n`;
+  bodyText += `📍 *Address:* ${deliveryAddress}\n\n`;
+  bodyText += `🛒 *Items:*\n${formattedInteractiveItems}\n`;
   bodyText += '━━━━━━━━━━━━━━━━━━━━\n';
-  bodyText += `*Total Amount:* ${currencySymbol}${total}\n`;
-  bodyText += '━━━━━━━━━━━━━━━━━━━━\n';
-  bodyText += 'Please accept or reject this order within 30 minutes.';
+  bodyText += `💰 *Total:* ${totalWithPayment}\n\n`;
+  bodyText += `Order Ref: #${order.order_reference}\n`;
+  bodyText += 'Please review and confirm or cancel the order.';
 
   return {
     messaging_product: 'whatsapp',

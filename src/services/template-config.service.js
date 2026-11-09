@@ -22,7 +22,7 @@ const axios = require('axios');
 const { parseInternalNotes } = require('./admin-restaurant.service');
 
 const SUPPORTED_TEMPLATES = {
-  ORDER_ALERT: 'restopro_order_alert',
+  ORDER_ALERT: process.env.ORDER_ALERT_TEMPLATE_NAME || process.env.META_ORDER_ALERT_TEMPLATE || 'restopro_order_alert',
   CUSTOMER_ACCEPTED: 'restopro_customer_order_accepted',
   CUSTOMER_REJECTED: 'restopro_customer_order_rejected'
 };
@@ -46,12 +46,19 @@ const APPROVAL_SOURCES = {
 
 const TEMPLATE_SPECS = {
   [SUPPORTED_TEMPLATES.ORDER_ALERT]: {
-    name: 'restopro_order_alert',
+    name: SUPPORTED_TEMPLATES.ORDER_ALERT,
     language: 'en',
     category: 'UTILITY',
     targetRole: 'OWNER',
     description: 'Order notification sent to restaurant owner with Accept and Reject quick-reply buttons.',
-    variables: ['Restaurant Name', 'Order Reference', 'Item Summary', 'Total Amount', 'Fulfilment Type'],
+    variables: [
+      'Customer Name',
+      'Customer Phone',
+      'Order Type',
+      'Delivery Address',
+      'Formatted Order Items',
+      'Total Payable with Payment Method'
+    ],
     buttons: ['Accept', 'Reject']
   },
   [SUPPORTED_TEMPLATES.CUSTOMER_ACCEPTED]: {
@@ -76,16 +83,23 @@ const TEMPLATE_SPECS = {
 
 const TEMPLATE_META_DEFINITIONS = {
   [SUPPORTED_TEMPLATES.ORDER_ALERT]: {
-    name: 'restopro_order_alert',
+    name: SUPPORTED_TEMPLATES.ORDER_ALERT,
     category: 'UTILITY',
     language: 'en',
     components: [
       {
         type: 'BODY',
-        text: 'New order received for {{1}}!\n\nOrder Ref: {{2}}\nItems:\n{{3}}\nTotal: {{4}}\nType: {{5}}\n\nPlease review and take action promptly.',
+        text: '🍽️ *New Order Received!*\n\n━━━━━━━━━━━━━━━━━━━━\n👤 *Customer:* {{1}}\n📞 *Phone:* {{2}}\n📦 *Order Type:* {{3}}\n📍 *Address:* {{4}}\n\n🛒 *Items:*\n{{5}}\n\n━━━━━━━━━━━━━━━━━━━━\n💰 *Total:* {{6}}\n\nPlease review and confirm or cancel the order.',
         example: {
           body_text: [
-            ['RestPro Demo', '#RP-261108-G83P', '1x Butter Chicken, 2x Garlic Naan', '₹550.00', 'Delivery']
+            [
+              'Madi',
+              '+919152115523',
+              'Delivery',
+              '504, United Avenue, Howldak Building, Mumbai 400008',
+              '4x Chicken Dum Biryani (Special)',
+              '₹3200.00 (Pay COD)'
+            ]
           ]
         }
       },
@@ -172,10 +186,15 @@ function resetTemplateApprovalsForTesting() {
  */
 function getEnvironmentTemplateStatus(templateName) {
   // Check explicit template-specific environment variables
-  if (templateName === SUPPORTED_TEMPLATES.ORDER_ALERT) {
+  if (
+    templateName === SUPPORTED_TEMPLATES.ORDER_ALERT ||
+    templateName === 'restopro_order_alert' ||
+    templateName === 'ORDER_ALERT'
+  ) {
     if (
       process.env.TEMPLATE_APPROVED_ORDER_ALERT === 'true' ||
-      process.env.CENTRAL_ORDER_ALERT_APPROVED === 'true'
+      process.env.CENTRAL_ORDER_ALERT_APPROVED === 'true' ||
+      process.env.OWNER_ORDER_ALERT_APPROVED === 'true'
     ) {
       return {
         isApproved: true,
@@ -254,7 +273,7 @@ async function isTemplateApproved(templateName, {
   // 2. LEGACY Mode Handling:
   // In LEGACY mode, owner alerts sent via restaurant number check restaurant-specific consent
   if (effectiveMode === 'LEGACY') {
-    if (templateName === SUPPORTED_TEMPLATES.ORDER_ALERT) {
+    if (templateName === SUPPORTED_TEMPLATES.ORDER_ALERT || templateName === 'restopro_order_alert') {
       const parsedNotes = restaurant ? parseInternalNotes(restaurant.internal_notes) : null;
       const isApproved = Boolean(
         parsedNotes?.ownerConsent?.templateApproved ||
@@ -307,7 +326,9 @@ async function isTemplateApproved(templateName, {
         ? targetCentralAccount.templates
         : {};
 
-      const templateEntry = dbTemplates[templateName];
+      const templateEntry = dbTemplates[templateName] ||
+        (templateName === SUPPORTED_TEMPLATES.ORDER_ALERT ? (dbTemplates['restopro_order_alert'] || dbTemplates[SUPPORTED_TEMPLATES.ORDER_ALERT]) : null) ||
+        (templateName === 'restopro_order_alert' ? dbTemplates[SUPPORTED_TEMPLATES.ORDER_ALERT] : null);
       if (templateEntry && typeof templateEntry === 'object') {
         const rawStatus = (templateEntry.status || '').toUpperCase().trim();
         const isApproved = rawStatus === 'APPROVED';
