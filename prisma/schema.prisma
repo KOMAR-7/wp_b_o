@@ -101,6 +101,10 @@ model Restaurant {
   central_account_id     String?               @db.Uuid
   central_account        CentralWhatsAppAccount? @relation(fields: [central_account_id], references: [id], onDelete: SetNull)
 
+  // R6.9: Platform Account Ownership & Tenant Classification
+  is_platform_account    Boolean               @default(false)
+  account_type           String                @default("RESTAURANT") @db.VarChar(64)
+
   orders                 Order[]
   sessions               ConversationSession[]
   saved_addresses        SavedAddress[]
@@ -111,6 +115,8 @@ model Restaurant {
   payments               Payment[]
 
   @@index([central_account_id])
+  @@index([is_platform_account])
+  @@index([account_type])
   @@map("restaurants")
 }
 

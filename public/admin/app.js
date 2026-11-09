@@ -334,9 +334,15 @@
       });
 
       const data = await apiCall(`/api/admin/restaurants?${q.toString()}`);
+      // Defensive client-side guard: exclude any central/platform accounts
+      const restaurants = (data.restaurants || []).filter((r) =>
+        !r.is_platform_account &&
+        r.account_type !== 'PLATFORM_CENTRAL' &&
+        r.account_type !== 'PLATFORM_TEST'
+      );
 
-      if (data.restaurants && data.restaurants.length > 0) {
-        tbody.innerHTML = data.restaurants.map((r) => {
+      if (restaurants.length > 0) {
+        tbody.innerHTML = restaurants.map((r) => {
           const subInfo = r.current_subscription
             ? `<span class="badge badge-success">${escapeHtml(r.current_subscription.plan_name)}</span>`
             : '<span class="text-muted">No active plan</span>';

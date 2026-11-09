@@ -11,6 +11,16 @@ async function getDashboardStats() {
   const now = new Date();
   const in30Days = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
+  // Central WhatsApp phone numbers to exclude from restaurant counts
+  const centralAccounts = await prisma.centralWhatsAppAccount.findMany({
+    select: { phone_number_id: true }
+  });
+  const centralPhoneIds = new Set(centralAccounts.map(c => c.phone_number_id));
+  if (process.env.CENTRAL_PHONE_NUMBER_ID) {
+    centralPhoneIds.add(process.env.CENTRAL_PHONE_NUMBER_ID);
+  }
+  centralPhoneIds.add('1427497060448125');
+
   const [
     restaurantCounts,
     subscriptionCounts,
@@ -18,9 +28,14 @@ async function getDashboardStats() {
     allPayments,
     activeSubscriptions
   ] = await Promise.all([
-    // Group counts for restaurants by tenant_status
+    // Group counts for genuine restaurant tenants by tenant_status
     prisma.restaurant.groupBy({
       by: ['tenant_status'],
+      where: {
+        is_platform_account: false,
+        account_type: 'RESTAURANT',
+        phone_number_id: { notIn: Array.from(centralPhoneIds) }
+      },
       _count: { id: true }
     }),
     // Group counts for subscriptions by status

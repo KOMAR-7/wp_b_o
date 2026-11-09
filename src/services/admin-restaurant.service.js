@@ -124,7 +124,21 @@ async function listRestaurants({
   const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 10));
   const skip = (pageNum - 1) * limitNum;
 
-  const where = {};
+  // Server-side exclusion of Central WhatsApp Accounts & Platform Accounts
+  const centralAccounts = await prisma.centralWhatsAppAccount.findMany({
+    select: { phone_number_id: true }
+  });
+  const centralPhoneIds = new Set(centralAccounts.map(c => c.phone_number_id));
+  if (process.env.CENTRAL_PHONE_NUMBER_ID) {
+    centralPhoneIds.add(process.env.CENTRAL_PHONE_NUMBER_ID);
+  }
+  centralPhoneIds.add('1427497060448125');
+
+  const where = {
+    is_platform_account: false,
+    account_type: 'RESTAURANT',
+    phone_number_id: { notIn: Array.from(centralPhoneIds) }
+  };
 
   if (search && typeof search === 'string' && search.trim().length > 0) {
     const q = search.trim();
@@ -324,6 +338,23 @@ async function createRestaurant(data, adminId, options = {}) {
     throw err;
   }
 
+  // Validate that phone_number_id does not belong to a Central WhatsApp Account
+  const centralAccounts = await prisma.centralWhatsAppAccount.findMany({
+    select: { phone_number_id: true }
+  });
+  const centralPhoneIds = new Set(centralAccounts.map(c => c.phone_number_id));
+  if (process.env.CENTRAL_PHONE_NUMBER_ID) {
+    centralPhoneIds.add(process.env.CENTRAL_PHONE_NUMBER_ID);
+  }
+  centralPhoneIds.add('1427497060448125');
+
+  if (centralPhoneIds.has(cleanPhoneId)) {
+    const err = new Error(`Phone Number ID "${cleanPhoneId}" belongs to a Central WhatsApp Account and cannot be registered as a restaurant tenant.`);
+    err.statusCode = 409;
+    err.code = 'CENTRAL_ACCOUNT_PHONE_CONFLICT';
+    throw err;
+  }
+
   // Clean, validate and encrypt access token safely
   let encryptedToken;
   if (access_token && typeof access_token === 'string' && access_token.trim().length > 0) {
@@ -388,7 +419,9 @@ async function createRestaurant(data, adminId, options = {}) {
         waba_id: cleanWabaId,
         access_token_encrypted: encryptedToken,
         tenant_status: normalizedStatus,
-        is_active: isActive
+        is_active: isActive,
+        is_platform_account: false,
+        account_type: 'RESTAURANT'
       }
     });
 
@@ -453,7 +486,7 @@ async function getRestaurantById(id) {
     }
   });
 
-  if (!restaurant) {
+  if (!restaurant || restaurant.is_platform_account) {
     const err = new Error(`Restaurant with ID "${id}" not found`);
     err.statusCode = 404;
     throw err;
@@ -553,7 +586,7 @@ async function updateRestaurant(id, updates, adminId, options = {}) {
   }
 
   const existing = await prisma.restaurant.findUnique({ where: { id } });
-  if (!existing) {
+  if (!existing || existing.is_platform_account) {
     const err = new Error(`Restaurant with ID "${id}" not found`);
     err.statusCode = 404;
     throw err;
@@ -715,7 +748,7 @@ async function updateRestaurantStatus(id, newStatus, adminId) {
   }
 
   const existing = await prisma.restaurant.findUnique({ where: { id } });
-  if (!existing) {
+  if (!existing || existing.is_platform_account) {
     const err = new Error(`Restaurant with ID "${id}" not found`);
     err.statusCode = 404;
     throw err;
@@ -786,7 +819,7 @@ async function retryFailedOutboxMessages(restaurantId, adminId) {
   const restaurant = await prisma.restaurant.findUnique({
     where: { id: restaurantId }
   });
-  if (!restaurant) {
+  if (!restaurant || restaurant.is_platform_account) {
     const err = new Error(`Restaurant with ID "${restaurantId}" not found`);
     err.statusCode = 404;
     throw err;

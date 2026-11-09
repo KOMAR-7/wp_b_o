@@ -903,13 +903,29 @@ async function getAssignedRestaurants(centralAccountId, db = prisma) {
 }
 
 /**
- * Returns all restaurants that currently do not have a Central WhatsApp account assigned.
+ * Returns all genuine restaurant tenants that currently do not have a Central WhatsApp account assigned.
+ * Excludes Central WhatsApp accounts and platform-owned accounts.
  * @param {Object} [db=prisma]
  * @returns {Promise<Array<Object>>}
  */
 async function getUnassignedRestaurants(db = prisma) {
+  // Query all Central WhatsApp phone numbers to exclude defensively
+  const centralAccounts = await db.centralWhatsAppAccount.findMany({
+    select: { phone_number_id: true }
+  });
+  const centralPhoneIds = new Set(centralAccounts.map(c => c.phone_number_id));
+  if (process.env.CENTRAL_PHONE_NUMBER_ID) {
+    centralPhoneIds.add(process.env.CENTRAL_PHONE_NUMBER_ID);
+  }
+  centralPhoneIds.add('1427497060448125');
+
   return db.restaurant.findMany({
-    where: { central_account_id: null },
+    where: {
+      central_account_id: null,
+      is_platform_account: false,
+      account_type: 'RESTAURANT',
+      phone_number_id: { notIn: Array.from(centralPhoneIds) }
+    },
     select: {
       id: true,
       name: true,
@@ -936,8 +952,8 @@ async function getUnassignedRestaurants(db = prisma) {
  */
 async function assignRestaurantToCentralAccount(restaurantId, centralAccountId, { adminId = null, db = prisma } = {}) {
   const restaurant = await db.restaurant.findUnique({ where: { id: restaurantId } });
-  if (!restaurant) {
-    const err = new Error(`Restaurant with ID "${restaurantId}" not found.`);
+  if (!restaurant || restaurant.is_platform_account) {
+    const err = new Error(`Restaurant with ID "${restaurantId}" not found or is a platform account.`);
     err.code = 'RESTAURANT_NOT_FOUND';
     err.statusCode = 404;
     throw err;
@@ -1008,8 +1024,8 @@ async function assignRestaurantToCentralAccount(restaurantId, centralAccountId, 
  */
 async function unassignRestaurantFromCentralAccount(restaurantId, { adminId = null, db = prisma } = {}) {
   const restaurant = await db.restaurant.findUnique({ where: { id: restaurantId } });
-  if (!restaurant) {
-    const err = new Error(`Restaurant with ID "${restaurantId}" not found.`);
+  if (!restaurant || restaurant.is_platform_account) {
+    const err = new Error(`Restaurant with ID "${restaurantId}" not found or is a platform account.`);
     err.code = 'RESTAURANT_NOT_FOUND';
     err.statusCode = 404;
     throw err;

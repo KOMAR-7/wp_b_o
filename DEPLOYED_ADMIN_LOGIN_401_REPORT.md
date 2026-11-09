@@ -221,3 +221,4 @@ To synchronize the database hash with your desired personal password without ech
 - **Zero Sensitive Data Leaked:** No passwords, hashes, tokens, or encryption keys printed or logged.
 - **Admin Record Preserved:** ID `d1071612-4c59-4010-a39c-d826010867c6`, name `Madi`, role `SUPER_ADMIN`, and active status remain intact.
 - **Root Cause Proven:** HTTP 401 was caused by the temporary password hash `SuperSecretPassword123!` in the cloud database; resolution runbook is documented above.
+
