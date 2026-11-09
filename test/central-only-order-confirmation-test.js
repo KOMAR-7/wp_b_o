@@ -336,33 +336,32 @@ async function runSuite() {
     assert(updatedOrder1.decision_at !== null, 'decision_at must be populated');
     recordTestPass('Order status transitioned to ACCEPTED in PostgreSQL');
 
-    // 7. Verify: Central XYZ sends final Accepted confirmation to Customer PQR
+    // 7. Verify: Restaurant ABC sends final Accepted confirmation to Customer PQR
     const customerAcceptedOutbox = await prisma.outboxMessage.findFirst({
-      where: {
-        restaurant_id: restA.id,
-        recipient_phone: CUSTOMER_PQR,
-        sender_channel: 'CENTRAL',
-        message_type: 'CUSTOMER_ORDER_DECISION'
-      },
-      orderBy: { created_at: 'desc' }
-    });
-    assert(customerAcceptedOutbox, 'Central XYZ must enqueue customer accepted notification');
-    assert.strictEqual(customerAcceptedOutbox.sender_channel, 'CENTRAL', 'Final decision MUST originate from CENTRAL (XYZ)');
-    assert.strictEqual(customerAcceptedOutbox.payload?.template?.name, 'restopro_customer_order_accepted',
-      'Must use restopro_customer_order_accepted Meta template');
-    recordTestPass('Central XYZ sends final Accepted notification to Customer PQR');
-
-    // 8. Verify: Restaurant ABC did NOT send any final confirmation
-    const illegalCustomerFinalABC = await prisma.outboxMessage.findFirst({
       where: {
         restaurant_id: restA.id,
         recipient_phone: CUSTOMER_PQR,
         sender_channel: 'RESTAURANT',
         message_type: 'CUSTOMER_ORDER_DECISION'
+      },
+      orderBy: { created_at: 'desc' }
+    });
+    assert(customerAcceptedOutbox, 'Restaurant ABC must enqueue customer accepted notification');
+    assert.strictEqual(customerAcceptedOutbox.sender_channel, 'RESTAURANT', 'Final decision MUST originate from Restaurant ABC');
+    assert(customerAcceptedOutbox.payload?.text?.body.includes('accepted by'), 'Payload must state order accepted by restaurant');
+    recordTestPass('Restaurant ABC sends final Accepted notification to Customer PQR');
+
+    // 8. Verify: Central XYZ did NOT send any final customer confirmation
+    const illegalCustomerFinalXYZ = await prisma.outboxMessage.findFirst({
+      where: {
+        restaurant_id: restA.id,
+        recipient_phone: CUSTOMER_PQR,
+        sender_channel: 'CENTRAL',
+        message_type: 'CUSTOMER_ORDER_DECISION'
       }
     });
-    assert.strictEqual(illegalCustomerFinalABC, null, 'Restaurant ABC must NEVER send the final customer decision');
-    recordTestPass('Restaurant ABC strictly prohibited from sending final confirmation');
+    assert.strictEqual(illegalCustomerFinalXYZ, null, 'Central XYZ must NEVER send the final customer decision');
+    recordTestPass('Central XYZ strictly prohibited from sending final customer confirmation');
 
     // -------------------------------------------------------------------------
     // TEST 2: COMPLETE END-TO-END REJECT FLOW
@@ -519,19 +518,32 @@ async function runSuite() {
     assert.strictEqual(updatedOrder2.status, 'REJECTED', 'Order status must be REJECTED');
     recordTestPass('Order status transitioned to REJECTED in PostgreSQL');
 
-    // Verify Central XYZ sends restopro_customer_order_rejected
+    // Verify Restaurant ABC sends final Rejected notification to Customer
     const customerRejectedOutbox = await prisma.outboxMessage.findFirst({
+      where: {
+        restaurant_id: restA.id,
+        recipient_phone: CUSTOMER_2,
+        sender_channel: 'RESTAURANT',
+        message_type: 'CUSTOMER_ORDER_DECISION'
+      },
+      orderBy: { created_at: 'desc' }
+    });
+    assert(customerRejectedOutbox, 'Restaurant ABC must enqueue customer rejected notification');
+    assert.strictEqual(customerRejectedOutbox.sender_channel, 'RESTAURANT', 'Rejected decision MUST originate from Restaurant ABC');
+    assert(customerRejectedOutbox.payload?.text?.body.includes('rejected by'), 'Payload must state order rejected by restaurant');
+    recordTestPass('Restaurant ABC sends final Rejected notification to Customer');
+
+    // Verify Central XYZ did NOT send any final customer confirmation
+    const illegalCustomerRejectXYZ = await prisma.outboxMessage.findFirst({
       where: {
         restaurant_id: restA.id,
         recipient_phone: CUSTOMER_2,
         sender_channel: 'CENTRAL',
         message_type: 'CUSTOMER_ORDER_DECISION'
-      },
-      orderBy: { created_at: 'desc' }
+      }
     });
-    assert(customerRejectedOutbox, 'Central XYZ must enqueue customer rejected notification');
-    assert.strictEqual(customerRejectedOutbox.payload?.template?.name, 'restopro_customer_order_rejected');
-    recordTestPass('Central XYZ sends final Rejected notification to Customer');
+    assert.strictEqual(illegalCustomerRejectXYZ, null, 'Central XYZ must NEVER send the final customer decision');
+    recordTestPass('Central XYZ strictly prohibited from sending final customer rejection');
 
     // -------------------------------------------------------------------------
     // TEST 3: MULTI-TENANT SIMULTANEOUS ROUTING & CROSS-TENANT ISOLATION

@@ -209,7 +209,7 @@ function buildCustomerDecisionNotificationPayload({ order, decision, restaurantN
 
     let bodyText = `✅ *ORDER ACCEPTED!*\n`;
     bodyText += '━━━━━━━━━━━━━━━━━━━━\n';
-    bodyText += `Great news! *${rName}* has accepted your order *#${order.order_reference}* and is preparing it.\n\n`;
+    bodyText += `Good news! Your order *#${order.order_reference}* has been accepted by *${rName}*.\n\n`;
     bodyText += `🥡 *Fulfilment:* ${fulfilmentText}\n`;
 
     if (isDelivery && order.address_snapshot) {
@@ -254,7 +254,7 @@ function buildCustomerDecisionNotificationPayload({ order, decision, restaurantN
   if (decision === 'REJECT') {
     let bodyText = `❌ *ORDER UPDATE: #${order.order_reference}*\n`;
     bodyText += '━━━━━━━━━━━━━━━━━━━━\n';
-    bodyText += `We are sorry, but *${rName}* was unable to accept your order *#${order.order_reference}* at this time.\n\n`;
+    bodyText += `Sorry! Your order *#${order.order_reference}* has been rejected by *${rName}*.\n\n`;
     bodyText += 'You have not been charged. If you would like to place a new order, please reply with "Hi" to view the menu.\n';
     bodyText += '━━━━━━━━━━━━━━━━━━━━\n';
     bodyText += 'Thank you for understanding.';

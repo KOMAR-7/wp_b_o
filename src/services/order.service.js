@@ -458,7 +458,7 @@ async function confirmCustomerOrder({
     }
 
     const consent = getOwnerConsent(restaurant);
-    const hasConsent = consent.optedIn && !consent.revoked;
+    const hasConsent = (consent.optedIn || (config.routingMode === 'CENTRAL' && Boolean(restaurant.owner_phone))) && !consent.revoked;
     let createdOutboxMessage = null;
 
     if (hasConsent) {
@@ -892,45 +892,21 @@ async function processOwnerOrderDecision({
         }
       });
 
-      // CENTRAL routing mode: Customer final decision notification MUST originate from Central WhatsApp (XYZ).
-      // Never send this final confirmation from restaurant number ABC.
-      const senderChannel = 'CENTRAL';
-      const targetTemplateName = effectiveDecision === 'ACCEPT'
-        ? 'restopro_customer_order_accepted'
-        : 'restopro_customer_order_rejected';
-
-      const decisionCheck = await isTemplateApproved(targetTemplateName, {
-        db: tx,
-        restaurant,
-        routingMode: 'CENTRAL'
+      // PHASE 4: FINAL CUSTOMER NOTIFICATION
+      // Send final message FROM THE RESTAURANT'S OWN WHATSAPP NUMBER ABC TO CUSTOMER PQR.
+      // If accepted: "Good news! Your order RP-XXXX has been accepted by Restaurant A."
+      // If rejected: "Sorry! Your order RP-XXXX has been rejected by Restaurant A."
+      // The final message MUST originate from ABC.
+      // Never send this final customer status from the central number.
+      const senderChannel = 'RESTAURANT';
+      const customerNotificationPayload = buildCustomerDecisionNotificationPayload({
+        order: updatedOrder,
+        decision: effectiveDecision,
+        restaurantName: restaurant.name
       });
-
-      let customerNotificationPayload;
-      if (decisionCheck.isApproved) {
-        customerNotificationPayload = buildCentralCustomerDecisionPayload({
-          order: updatedOrder,
-          decision: effectiveDecision,
-          restaurantName: restaurant.name,
-          templateName: targetTemplateName
-        });
-      } else {
-        customerNotificationPayload = {
-          blockedReason: 'BLOCKED_TEMPLATE_NOT_CONFIGURED',
-          orderReference: updatedOrder.order_reference,
-          orderId: updatedOrder.id,
-          decision: effectiveDecision,
-          templateName: targetTemplateName,
-          failureReason: decisionCheck.reason
-        };
-      }
 
       const rawCustomerPhone = updatedOrder.customer_phone ? updatedOrder.customer_phone.trim() : '';
       const cleanCustomerPhone = rawCustomerPhone.replace(/[^\d]/g, '');
-
-      const isBlockedTemplate = customerNotificationPayload.blockedReason === 'BLOCKED_TEMPLATE_NOT_CONFIGURED';
-      const templateNameForRecord = effectiveDecision === 'ACCEPT'
-        ? 'restopro_customer_order_accepted'
-        : 'restopro_customer_order_rejected';
 
       // Atomically persist customer outbox message
       const outboxMessage = await tx.outboxMessage.create({
@@ -941,10 +917,8 @@ async function processOwnerOrderDecision({
           message_type: 'CUSTOMER_ORDER_DECISION',
           payload: customerNotificationPayload,
           idempotency_key: `customer_decision_${updatedOrder.id}_${effectiveDecision.toLowerCase()}`,
-          status: isBlockedTemplate ? 'FAILED' : 'PENDING',
-          last_error: isBlockedTemplate
-            ? `BLOCKED_TEMPLATE_NOT_CONFIGURED: Central WhatsApp requires approved Meta Utility Template ${templateNameForRecord}`
-            : null
+          status: 'PENDING',
+          last_error: null
         }
       });
 
@@ -959,11 +933,9 @@ async function processOwnerOrderDecision({
           restaurant_id: effectiveRestaurantId,
           recipient_phone: cleanCustomerPhone,
           notification_type: notificationType,
-          template_name: templateNameForRecord,
-          delivery_status: isBlockedTemplate ? 'FAILED' : 'PENDING',
-          error_message: isBlockedTemplate
-            ? `BLOCKED_TEMPLATE_NOT_CONFIGURED: Central WhatsApp requires approved Meta Utility Template ${templateNameForRecord}`
-            : null
+          template_name: null,
+          delivery_status: 'PENDING',
+          error_message: null
         }
       });
 
