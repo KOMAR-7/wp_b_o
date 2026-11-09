@@ -12,14 +12,8 @@ async function getDashboardStats() {
   const in30Days = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
   // Central WhatsApp phone numbers to exclude from restaurant counts
-  const centralAccounts = await prisma.centralWhatsAppAccount.findMany({
-    select: { phone_number_id: true }
-  });
-  const centralPhoneIds = new Set(centralAccounts.map(c => c.phone_number_id));
-  if (process.env.CENTRAL_PHONE_NUMBER_ID) {
-    centralPhoneIds.add(process.env.CENTRAL_PHONE_NUMBER_ID);
-  }
-  centralPhoneIds.add('1427497060448125');
+  const { getActiveCentralPhoneIds } = require('./central-whatsapp.service');
+  const centralPhoneIds = await getActiveCentralPhoneIds(prisma);
 
   const [
     restaurantCounts,

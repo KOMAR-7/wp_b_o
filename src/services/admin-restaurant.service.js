@@ -125,14 +125,8 @@ async function listRestaurants({
   const skip = (pageNum - 1) * limitNum;
 
   // Server-side exclusion of Central WhatsApp Accounts & Platform Accounts
-  const centralAccounts = await prisma.centralWhatsAppAccount.findMany({
-    select: { phone_number_id: true }
-  });
-  const centralPhoneIds = new Set(centralAccounts.map(c => c.phone_number_id));
-  if (process.env.CENTRAL_PHONE_NUMBER_ID) {
-    centralPhoneIds.add(process.env.CENTRAL_PHONE_NUMBER_ID);
-  }
-  centralPhoneIds.add('1427497060448125');
+  const { getActiveCentralPhoneIds } = require('./central-whatsapp.service');
+  const centralPhoneIds = await getActiveCentralPhoneIds(prisma);
 
   const where = {
     is_platform_account: false,
@@ -338,17 +332,11 @@ async function createRestaurant(data, adminId, options = {}) {
     throw err;
   }
 
-  // Validate that phone_number_id does not belong to a Central WhatsApp Account
-  const centralAccounts = await prisma.centralWhatsAppAccount.findMany({
-    select: { phone_number_id: true }
-  });
-  const centralPhoneIds = new Set(centralAccounts.map(c => c.phone_number_id));
-  if (process.env.CENTRAL_PHONE_NUMBER_ID) {
-    centralPhoneIds.add(process.env.CENTRAL_PHONE_NUMBER_ID);
-  }
-  centralPhoneIds.add('1427497060448125');
+  // Validate that phone_number_id does not belong to an active Central WhatsApp Account
+  const { isCentralPhoneNumberId } = require('./central-whatsapp.service');
+  const isCentral = await isCentralPhoneNumberId(cleanPhoneId, prisma);
 
-  if (centralPhoneIds.has(cleanPhoneId)) {
+  if (isCentral) {
     const err = new Error(`Phone Number ID "${cleanPhoneId}" belongs to a Central WhatsApp Account and cannot be registered as a restaurant tenant.`);
     err.statusCode = 409;
     err.code = 'CENTRAL_ACCOUNT_PHONE_CONFLICT';
@@ -616,6 +604,14 @@ async function updateRestaurant(id, updates, adminId, options = {}) {
     if (!/^\d{8,64}$/.test(newPhoneId)) {
       const err = new Error('Invalid phone_number_id format: must contain 8-64 numeric digits');
       err.statusCode = 400;
+      throw err;
+    }
+    const { isCentralPhoneNumberId } = require('./central-whatsapp.service');
+    const isCentral = await isCentralPhoneNumberId(newPhoneId, prisma);
+    if (isCentral) {
+      const err = new Error(`Phone Number ID "${newPhoneId}" belongs to a Central WhatsApp Account and cannot be registered as a restaurant tenant.`);
+      err.statusCode = 409;
+      err.code = 'CENTRAL_ACCOUNT_PHONE_CONFLICT';
       throw err;
     }
     const duplicate = await prisma.restaurant.findUnique({ where: { phone_number_id: newPhoneId } });

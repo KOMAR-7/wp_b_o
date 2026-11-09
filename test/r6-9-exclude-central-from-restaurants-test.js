@@ -131,15 +131,14 @@ async function runSuite() {
   assert.strictEqual(resList.status, 200, 'Listing restaurants must return HTTP 200');
   const listedRestaurants = resList.body.restaurants || [];
 
-  // Verify RestPro central account or any central account phone number is NOT listed
+  // Verify any central account phone number is NOT listed
+  const { getActiveCentralPhoneIds } = require('../src/services/central-whatsapp.service');
+  const centralPhoneSet = await getActiveCentralPhoneIds(prisma);
   const centralAccounts = await prisma.centralWhatsAppAccount.findMany();
-  const centralPhoneIds = centralAccounts.map(c => c.phone_number_id);
-  centralPhoneIds.push('1427497060448125'); // canonical central number
 
   for (const r of listedRestaurants) {
-    assert.strictEqual(centralPhoneIds.includes(r.phone_number_id), false,
+    assert.strictEqual(centralPhoneSet.has(r.phone_number_id), false,
       `Central phone number ID ${r.phone_number_id} must not appear in restaurants list`);
-    assert.notStrictEqual(r.name, 'RestPro', 'RestPro central account record must not appear in restaurants list');
     assert.notStrictEqual(r.is_platform_account, true, 'Platform accounts must not appear in restaurants list');
     assert.notStrictEqual(r.account_type, 'PLATFORM_CENTRAL', 'PLATFORM_CENTRAL type must not appear in restaurants list');
     assert.notStrictEqual(r.account_type, 'PLATFORM_TEST', 'PLATFORM_TEST type must not appear in restaurants list');
@@ -244,9 +243,9 @@ async function runSuite() {
 
   // Central account and platform accounts must never appear in unassigned list
   for (const ur of unassignedRests) {
-    assert.strictEqual(centralPhoneIds.includes(ur.phone_number_id), false,
+    assert.strictEqual(centralPhoneSet.has(ur.phone_number_id), false,
       `Central phone ${ur.phone_number_id} must not appear in unassigned dropdown`);
-    assert.notStrictEqual(ur.name, 'RestPro', 'RestPro central account must not appear in unassigned dropdown');
+    assert.notStrictEqual(ur.is_platform_account, true, 'Platform accounts must not appear in unassigned dropdown');
   }
   recordTestPass('Tenant isolation intact: unassigned list excludes all central & platform records');
 

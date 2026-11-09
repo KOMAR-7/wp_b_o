@@ -837,6 +837,30 @@ async function deleteCentralAccount(id, { force = false, db = prisma } = {}) {
 }
 
 /**
+ * Retrieves the set of active Central WhatsApp Phone Number IDs.
+ * Strictly queries active, non-deleted central accounts and configured environment central phone.
+ * Never includes soft-deleted records or unrelated restaurant numbers.
+ *
+ * @param {Object} [db=prisma]
+ * @returns {Promise<Set<string>>}
+ */
+async function getActiveCentralPhoneIds(db = prisma) {
+  const centralAccounts = await db.centralWhatsAppAccount.findMany({
+    where: {
+      deleted_at: null,
+      is_active: true
+    },
+    select: { phone_number_id: true }
+  });
+  const centralPhoneIds = new Set(centralAccounts.map(c => c.phone_number_id.trim()));
+  const envCentralId = (config.central?.phoneNumberId || process.env.CENTRAL_PHONE_NUMBER_ID || '').trim();
+  if (envCentralId) {
+    centralPhoneIds.add(envCentralId);
+  }
+  return centralPhoneIds;
+}
+
+/**
  * Determines whether a given phone_number_id belongs to ANY active Central WhatsApp account.
  *
  * @param {string} phoneNumberId
@@ -909,15 +933,8 @@ async function getAssignedRestaurants(centralAccountId, db = prisma) {
  * @returns {Promise<Array<Object>>}
  */
 async function getUnassignedRestaurants(db = prisma) {
-  // Query all Central WhatsApp phone numbers to exclude defensively
-  const centralAccounts = await db.centralWhatsAppAccount.findMany({
-    select: { phone_number_id: true }
-  });
-  const centralPhoneIds = new Set(centralAccounts.map(c => c.phone_number_id));
-  if (process.env.CENTRAL_PHONE_NUMBER_ID) {
-    centralPhoneIds.add(process.env.CENTRAL_PHONE_NUMBER_ID);
-  }
-  centralPhoneIds.add('1427497060448125');
+  // Query all active Central WhatsApp phone numbers to exclude defensively
+  const centralPhoneIds = await getActiveCentralPhoneIds(db);
 
   return db.restaurant.findMany({
     where: {
@@ -1169,6 +1186,7 @@ module.exports = {
   sanitizeCentralAccount,
   isValidTokenFormat,
   isCentralPhoneNumberId,
+  getActiveCentralPhoneIds,
   getAssignedRestaurants,
   getUnassignedRestaurants,
   assignRestaurantToCentralAccount,
