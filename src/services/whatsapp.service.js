@@ -72,7 +72,12 @@ function buildOwnerNotificationPayload({
     .map(item => `${item.quantity || 1}x ${item.productName || item.name || 'Item'}`)
     .join(', ') || 'Order Items';
 
-  const fulfilmentText = order.order_type === 'DELIVERY' ? 'Delivery' : 'Takeaway (Self-Pickup)';
+  const custName = order.customer_name || 'Customer';
+  const custPhone = order.customer_phone || '';
+  const addr = (order.order_type === 'DELIVERY' && order.address_snapshot) ? ` to ${order.address_snapshot}` : '';
+  const fulfilmentText = order.order_type === 'DELIVERY'
+    ? `Delivery${addr} (Customer: ${custName}, ${custPhone})`.slice(0, 1024)
+    : `Takeaway (Self-Pickup) (Customer: ${custName}, ${custPhone})`.slice(0, 1024);
 
   // If outside 24h window or explicitly requested: use approved Meta Utility Template format
   if (useTemplate) {

@@ -12,7 +12,7 @@ const config = {
   databaseUrl: process.env.DATABASE_URL || '',
   encryptionKey: process.env.ENCRYPTION_KEY || '',
   ownerCallbackSecret: process.env.OWNER_CALLBACK_SECRET || '',
-  routingMode: (process.env.NOTIFICATION_ROUTING_MODE || 'LEGACY').toUpperCase().trim(),
+  routingMode: (process.env.NOTIFICATION_ROUTING_MODE || 'CENTRAL').toUpperCase().trim(),
   meta: {
     verifyToken: process.env.META_VERIFY_TOKEN || '',
     appSecret: process.env.META_APP_SECRET || '',
@@ -45,8 +45,8 @@ function validateConfig(testConfig = config) {
     if (testConfig.nodeEnv === 'production') {
       throw new Error(errorMsg);
     } else {
-      console.warn(`[CONFIG WARNING] ${errorMsg}. Defaulting to LEGACY.`);
-      testConfig.routingMode = 'LEGACY';
+      console.warn(`[CONFIG WARNING] ${errorMsg}. Defaulting to CENTRAL.`);
+      testConfig.routingMode = 'CENTRAL';
     }
   }
 

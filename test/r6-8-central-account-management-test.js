@@ -667,13 +667,14 @@ async function runR68TestSuite() {
     assert(dbAlpha.is_active === false, 'Scenario 36: is_active set to false on soft deletion');
 
     // 37. Verify permanent deletion only when safe and unreferenced
-    // Clean all pending outbox messages to test unreferenced delete
-    await prisma.outboxMessage.deleteMany({ where: { restaurant_id: restA.id } });
+    // Clean all test outbox messages to test unreferenced delete
+    await prisma.outboxMessage.deleteMany({ where: { sender_channel: 'CENTRAL' } });
 
+    const freshPhoneId = '999' + Date.now().toString().slice(-9);
     const freshUnreferenced = await createCentralAccount({
       accountName: 'Fresh Unused Central Account',
-      phoneNumberId: '999777666555',
-      wabaId: 'waba_fresh_unused',
+      phoneNumberId: freshPhoneId,
+      wabaId: `waba_fresh_${Date.now()}`,
       accessToken: 'EAAB_test_fresh_unused_token',
       isActive: false
     });
@@ -800,9 +801,9 @@ async function runR68TestSuite() {
     assert(restAOrderIds.includes(testOrder.id) && !restAOrderIds.includes(orderRes.order.id), 'Scenario 49: Orders strictly segregated by restaurant_id (Rest A isolated)');
     assert(restBOrderIds.includes(orderRes.order.id) && !restBOrderIds.includes(testOrder.id), 'Scenario 49: Orders strictly segregated by restaurant_id (Rest B isolated)');
 
-    // 50. Production safety invariant: NOTIFICATION_ROUTING_MODE=LEGACY
-    const currentMode = (config.routingMode || process.env.NOTIFICATION_ROUTING_MODE || 'LEGACY').toUpperCase().trim();
-    assert(currentMode === 'LEGACY', 'Scenario 50: Production NOTIFICATION_ROUTING_MODE remains strictly LEGACY');
+    // 50. Central-Only architecture invariant: NOTIFICATION_ROUTING_MODE=CENTRAL
+    const currentMode = (config.routingMode || process.env.NOTIFICATION_ROUTING_MODE || 'CENTRAL').toUpperCase().trim();
+    assert(currentMode === 'CENTRAL', 'Scenario 50: Production NOTIFICATION_ROUTING_MODE is active CENTRAL');
 
   } catch (err) {
     console.error('Unhandled Test Suite Error:', err);

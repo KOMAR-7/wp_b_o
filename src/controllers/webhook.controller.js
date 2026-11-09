@@ -174,43 +174,17 @@ async function handleIncomingEvent(req, res) {
           continue;
         }
 
-        // Check if message is an owner interactive action (e.g. OWNER_ACCEPT:<id>, OWNER_REJECT:<id>, or signed OWNER_SIG:)
+        // Legacy restaurant-number Accept/Reject handler eliminated:
+        // Owner decisions are strictly disallowed on restaurant numbers. They MUST be routed through Central number XYZ.
         const actionPayload = event.interactiveReply?.id || event.buttonReply?.payload || null;
         if (actionPayload && typeof actionPayload === 'string' && (actionPayload.startsWith('OWNER_') || actionPayload.startsWith('OWNER_SIG:'))) {
-          logger.info('Received owner decision interactive payload', {
+          logger.warn('Owner decision interactive payload rejected on restaurant number; owner decisions must be routed via Central WhatsApp number', {
             phoneNumberId: event.phoneNumberId,
             senderPhone: event.senderPhone,
             payload: actionPayload
           });
-
-          const decisionResult = await processOwnerOrderDecision({
-            restaurantId: tenant.id,
-            senderPhone: event.senderPhone,
-            buttonPayload: actionPayload
-          });
-
-          if (!decisionResult.success) {
-            logger.warn('Owner decision rejected', {
-              phoneNumberId: event.phoneNumberId,
-              senderPhone: event.senderPhone,
-              code: decisionResult.code,
-              error: decisionResult.error
-            });
-            if (eventRecord) {
-              await markEventFailed(eventRecord.id, `Owner decision rejected: ${decisionResult.error}`);
-            }
-            continue;
-          }
-
-          logger.info('Owner decision processed successfully', {
-            orderId: decisionResult.order?.id,
-            orderReference: decisionResult.order?.order_reference,
-            status: decisionResult.order?.status,
-            isDuplicate: decisionResult.isDuplicate || false
-          });
-
           if (eventRecord) {
-            await markEventCompleted(eventRecord.id);
+            await markEventFailed(eventRecord.id, 'Owner decisions not permitted on restaurant number; must use Central number');
           }
           continue;
         }

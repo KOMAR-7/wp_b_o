@@ -290,7 +290,7 @@ async function runSuite() {
     where: { id: targetOutboxId }
   });
   assert(outbox, 'Outbox notification message must be created');
-  assert.strictEqual(outbox.sender_channel, 'RESTAURANT', 'In LEGACY mode sender_channel is RESTAURANT');
+  assert.strictEqual(outbox.sender_channel, 'CENTRAL', 'In CENTRAL mode sender_channel is CENTRAL');
   recordTestPass('Owner decision processing and customer outbox notification flow works cleanly');
 
   // --- SCENARIO 9: Restaurant CRUD operations remain functional ---

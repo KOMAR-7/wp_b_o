@@ -462,198 +462,82 @@ async function confirmCustomerOrder({
     let createdOutboxMessage = null;
 
     if (hasConsent) {
-      const isCentralMode = config.routingMode === 'CENTRAL' ||
-        (process.env.NOTIFICATION_ROUTING_MODE || '').toUpperCase().trim() === 'CENTRAL';
+      // CENTRAL routing mode: Owner order alert MUST originate from Central WhatsApp (XYZ).
+      // Never send the owner order confirmation request from restaurant number ABC.
+      const alertCheck = await isTemplateApproved('restopro_order_alert', {
+        db: tx,
+        restaurant,
+        routingMode: 'CENTRAL'
+      });
 
-      const parsedNotes = parseInternalNotes(restaurant.internal_notes);
-      const cleanOwnerDigits = rawOwnerPhone.replace(/[^\d]/g, '');
-
-      if (isCentralMode) {
-        // CENTRAL routing mode: Owner order alert must originate from Central WhatsApp (XYZ)
-        // Central number communicates with owner outside 24h window -> requires approved Meta Utility Template
-        const alertCheck = await isTemplateApproved('restopro_order_alert', {
-          db: tx,
-          restaurant,
-          routingMode: 'CENTRAL'
+      if (alertCheck.isApproved) {
+        const ownerNotificationPayload = buildOwnerNotificationPayload({
+          ownerPhone: rawOwnerPhone,
+          order: createdOrder,
+          restaurantName: restaurant.name,
+          useTemplate: true,
+          templateName: 'restopro_order_alert'
         });
 
-        if (alertCheck.isApproved) {
-          const ownerNotificationPayload = buildOwnerNotificationPayload({
-            ownerPhone: rawOwnerPhone,
-            order: createdOrder,
-            restaurantName: restaurant.name,
-            useTemplate: true,
-            templateName: 'restopro_order_alert'
-          });
+        createdOutboxMessage = await tx.outboxMessage.create({
+          data: {
+            restaurant_id: restaurantId,
+            recipient_phone: rawOwnerPhone.trim(),
+            sender_channel: 'CENTRAL',
+            message_type: 'OWNER_ORDER_NOTIFICATION',
+            payload: ownerNotificationPayload,
+            idempotency_key: `owner_notif_${createdOrder.id}`,
+            status: 'PENDING'
+          }
+        });
 
-          createdOutboxMessage = await tx.outboxMessage.create({
-            data: {
-              restaurant_id: restaurantId,
-              recipient_phone: rawOwnerPhone.trim(),
-              sender_channel: 'CENTRAL',
-              message_type: 'OWNER_ORDER_NOTIFICATION',
-              payload: ownerNotificationPayload,
-              idempotency_key: `owner_notif_${createdOrder.id}`,
-              status: 'PENDING'
-            }
-          });
-
-          await tx.orderNotification.create({
-            data: {
-              order_id: createdOrder.id,
-              restaurant_id: restaurantId,
-              recipient_phone: rawOwnerPhone.trim(),
-              notification_type: 'OWNER_ORDER_ALERT',
-              template_name: 'restopro_order_alert',
-              delivery_status: 'PENDING'
-            }
-          });
-        } else {
-          // Central template not configured/approved: Mark as BLOCKED_TEMPLATE_NOT_CONFIGURED
-          createdOutboxMessage = await tx.outboxMessage.create({
-            data: {
-              restaurant_id: restaurantId,
-              recipient_phone: rawOwnerPhone.trim(),
-              sender_channel: 'CENTRAL',
-              message_type: 'OWNER_ORDER_NOTIFICATION',
-              payload: {
-                blockedReason: 'BLOCKED_TEMPLATE_NOT_CONFIGURED',
-                orderReference: createdOrder.order_reference,
-                orderId: createdOrder.id
-              },
-              idempotency_key: `owner_notif_${createdOrder.id}`,
-              status: 'FAILED',
-              last_error: 'BLOCKED_TEMPLATE_NOT_CONFIGURED: Central WhatsApp requires approved Meta Utility Template restopro_order_alert'
-            }
-          });
-
-          await tx.orderNotification.create({
-            data: {
-              order_id: createdOrder.id,
-              restaurant_id: restaurantId,
-              recipient_phone: rawOwnerPhone.trim(),
-              notification_type: 'OWNER_ORDER_ALERT',
-              template_name: 'restopro_order_alert',
-              delivery_status: 'FAILED',
-              error_message: 'BLOCKED_TEMPLATE_NOT_CONFIGURED: Central WhatsApp requires approved Meta Utility Template restopro_order_alert'
-            }
-          });
-
-          logger.warn('Central owner notification marked as BLOCKED_TEMPLATE_NOT_CONFIGURED', {
-            restaurantId,
-            orderId: createdOrder.id,
-            ownerPhone: rawOwnerPhone
-          });
-        }
+        await tx.orderNotification.create({
+          data: {
+            order_id: createdOrder.id,
+            restaurant_id: restaurantId,
+            recipient_phone: rawOwnerPhone.trim(),
+            notification_type: 'OWNER_ORDER_ALERT',
+            template_name: 'restopro_order_alert',
+            delivery_status: 'PENDING'
+          }
+        });
       } else {
-        // LEGACY routing mode: Owner order alert originates directly from restaurant number
-        const isWindowActive = await isOwnerMessagingWindowActive(restaurantId, rawOwnerPhone, tx);
-        const legacyAlertCheck = await isTemplateApproved('restopro_order_alert', {
-          db: tx,
-          restaurant,
-          routingMode: 'LEGACY'
+        // Central template not configured/approved: Mark as BLOCKED_TEMPLATE_NOT_CONFIGURED.
+        // Never fall back to restaurant credentials or restaurant sender channel.
+        createdOutboxMessage = await tx.outboxMessage.create({
+          data: {
+            restaurant_id: restaurantId,
+            recipient_phone: rawOwnerPhone.trim(),
+            sender_channel: 'CENTRAL',
+            message_type: 'OWNER_ORDER_NOTIFICATION',
+            payload: {
+              blockedReason: 'BLOCKED_TEMPLATE_NOT_CONFIGURED',
+              orderReference: createdOrder.order_reference,
+              orderId: createdOrder.id
+            },
+            idempotency_key: `owner_notif_${createdOrder.id}`,
+            status: 'FAILED',
+            last_error: 'BLOCKED_TEMPLATE_NOT_CONFIGURED: Central WhatsApp requires approved Meta Utility Template restopro_order_alert'
+          }
         });
-        const isLegacyTemplateApproved = legacyAlertCheck.isApproved;
 
-        if (isWindowActive) {
-          // Window open: Dispatch interactive button message
-          const ownerNotificationPayload = buildOwnerNotificationPayload({
-            ownerPhone: rawOwnerPhone,
-            order: createdOrder,
-            restaurantName: restaurant.name,
-            useTemplate: false
-          });
+        await tx.orderNotification.create({
+          data: {
+            order_id: createdOrder.id,
+            restaurant_id: restaurantId,
+            recipient_phone: rawOwnerPhone.trim(),
+            notification_type: 'OWNER_ORDER_ALERT',
+            template_name: 'restopro_order_alert',
+            delivery_status: 'FAILED',
+            error_message: 'BLOCKED_TEMPLATE_NOT_CONFIGURED: Central WhatsApp requires approved Meta Utility Template restopro_order_alert'
+          }
+        });
 
-          createdOutboxMessage = await tx.outboxMessage.create({
-            data: {
-              restaurant_id: restaurantId,
-              recipient_phone: rawOwnerPhone.trim(),
-              sender_channel: 'RESTAURANT',
-              message_type: 'OWNER_ORDER_NOTIFICATION',
-              payload: ownerNotificationPayload,
-              idempotency_key: `owner_notif_${createdOrder.id}`,
-              status: 'PENDING'
-            }
-          });
-
-          await tx.orderNotification.create({
-            data: {
-              order_id: createdOrder.id,
-              restaurant_id: restaurantId,
-              recipient_phone: rawOwnerPhone.trim(),
-              notification_type: 'OWNER_ORDER_ALERT',
-              delivery_status: 'PENDING'
-            }
-          });
-        } else if (isLegacyTemplateApproved) {
-          // Window closed, but template is approved: dispatch approved Meta Utility Template
-          const ownerNotificationPayload = buildOwnerNotificationPayload({
-            ownerPhone: rawOwnerPhone,
-            order: createdOrder,
-            restaurantName: restaurant.name,
-            useTemplate: true,
-            templateName: 'restopro_order_alert'
-          });
-
-          createdOutboxMessage = await tx.outboxMessage.create({
-            data: {
-              restaurant_id: restaurantId,
-              recipient_phone: rawOwnerPhone.trim(),
-              sender_channel: 'RESTAURANT',
-              message_type: 'OWNER_ORDER_NOTIFICATION',
-              payload: ownerNotificationPayload,
-              idempotency_key: `owner_notif_${createdOrder.id}`,
-              status: 'PENDING'
-            }
-          });
-
-          await tx.orderNotification.create({
-            data: {
-              order_id: createdOrder.id,
-              restaurant_id: restaurantId,
-              recipient_phone: rawOwnerPhone.trim(),
-              notification_type: 'OWNER_ORDER_ALERT',
-              template_name: 'restopro_order_alert',
-              delivery_status: 'PENDING'
-            }
-          });
-        } else {
-          // Window closed and template NOT configured/approved:
-          // Do NOT send invalid template to Meta! Mark as BLOCKED_TEMPLATE_NOT_CONFIGURED.
-          createdOutboxMessage = await tx.outboxMessage.create({
-            data: {
-              restaurant_id: restaurantId,
-              recipient_phone: rawOwnerPhone.trim(),
-              sender_channel: 'RESTAURANT',
-              message_type: 'OWNER_ORDER_NOTIFICATION',
-              payload: {
-                blockedReason: 'BLOCKED_TEMPLATE_NOT_CONFIGURED',
-                orderReference: createdOrder.order_reference,
-                orderId: createdOrder.id
-              },
-              idempotency_key: `owner_notif_${createdOrder.id}`,
-              status: 'FAILED',
-              last_error: 'BLOCKED_TEMPLATE_NOT_CONFIGURED: Owner 24h window closed and Meta Utility Template restopro_order_alert not configured/approved'
-            }
-          });
-
-          await tx.orderNotification.create({
-            data: {
-              order_id: createdOrder.id,
-              restaurant_id: restaurantId,
-              recipient_phone: rawOwnerPhone.trim(),
-              notification_type: 'OWNER_ORDER_ALERT',
-              delivery_status: 'FAILED',
-              error_message: 'BLOCKED_TEMPLATE_NOT_CONFIGURED: Owner 24h window closed and Meta Utility Template restopro_order_alert not configured/approved'
-            }
-          });
-
-          logger.warn('Owner notification marked as BLOCKED_TEMPLATE_NOT_CONFIGURED', {
-            restaurantId,
-            orderId: createdOrder.id,
-            ownerPhone: rawOwnerPhone
-          });
-        }
+        logger.warn('Central owner notification marked as BLOCKED_TEMPLATE_NOT_CONFIGURED', {
+          restaurantId,
+          orderId: createdOrder.id,
+          ownerPhone: rawOwnerPhone
+        });
       }
     } else {
       logger.warn('Skipping owner order notification: consent not granted or revoked', {
@@ -1008,54 +892,42 @@ async function processOwnerOrderDecision({
         }
       });
 
-      const isCentralMode = config.routingMode === 'CENTRAL' ||
-        (process.env.NOTIFICATION_ROUTING_MODE || '').toUpperCase().trim() === 'CENTRAL';
+      // CENTRAL routing mode: Customer final decision notification MUST originate from Central WhatsApp (XYZ).
+      // Never send this final confirmation from restaurant number ABC.
+      const senderChannel = 'CENTRAL';
+      const targetTemplateName = effectiveDecision === 'ACCEPT'
+        ? 'restopro_customer_order_accepted'
+        : 'restopro_customer_order_rejected';
+
+      const decisionCheck = await isTemplateApproved(targetTemplateName, {
+        db: tx,
+        restaurant,
+        routingMode: 'CENTRAL'
+      });
 
       let customerNotificationPayload;
-      let senderChannel = 'RESTAURANT';
-
-      if (isCentralMode) {
-        senderChannel = 'CENTRAL';
-        const targetTemplateName = effectiveDecision === 'ACCEPT'
-          ? 'restopro_customer_order_accepted'
-          : 'restopro_customer_order_rejected';
-
-        const decisionCheck = await isTemplateApproved(targetTemplateName, {
-          db: tx,
-          restaurant,
-          routingMode: 'CENTRAL'
-        });
-
-        if (decisionCheck.isApproved) {
-          customerNotificationPayload = buildCentralCustomerDecisionPayload({
-            order: updatedOrder,
-            decision: effectiveDecision,
-            restaurantName: restaurant.name,
-            templateName: targetTemplateName
-          });
-        } else {
-          customerNotificationPayload = {
-            blockedReason: 'BLOCKED_TEMPLATE_NOT_CONFIGURED',
-            orderReference: updatedOrder.order_reference,
-            orderId: updatedOrder.id,
-            decision: effectiveDecision,
-            templateName: targetTemplateName,
-            failureReason: decisionCheck.reason
-          };
-        }
-      } else {
-        senderChannel = 'RESTAURANT';
-        customerNotificationPayload = buildCustomerDecisionNotificationPayload({
+      if (decisionCheck.isApproved) {
+        customerNotificationPayload = buildCentralCustomerDecisionPayload({
           order: updatedOrder,
           decision: effectiveDecision,
-          restaurantName: restaurant.name
+          restaurantName: restaurant.name,
+          templateName: targetTemplateName
         });
+      } else {
+        customerNotificationPayload = {
+          blockedReason: 'BLOCKED_TEMPLATE_NOT_CONFIGURED',
+          orderReference: updatedOrder.order_reference,
+          orderId: updatedOrder.id,
+          decision: effectiveDecision,
+          templateName: targetTemplateName,
+          failureReason: decisionCheck.reason
+        };
       }
 
       const rawCustomerPhone = updatedOrder.customer_phone ? updatedOrder.customer_phone.trim() : '';
       const cleanCustomerPhone = rawCustomerPhone.replace(/[^\d]/g, '');
 
-      const isBlockedTemplate = isCentralMode && customerNotificationPayload.blockedReason === 'BLOCKED_TEMPLATE_NOT_CONFIGURED';
+      const isBlockedTemplate = customerNotificationPayload.blockedReason === 'BLOCKED_TEMPLATE_NOT_CONFIGURED';
       const templateNameForRecord = effectiveDecision === 'ACCEPT'
         ? 'restopro_customer_order_accepted'
         : 'restopro_customer_order_rejected';
@@ -1087,7 +959,7 @@ async function processOwnerOrderDecision({
           restaurant_id: effectiveRestaurantId,
           recipient_phone: cleanCustomerPhone,
           notification_type: notificationType,
-          template_name: isCentralMode ? templateNameForRecord : null,
+          template_name: templateNameForRecord,
           delivery_status: isBlockedTemplate ? 'FAILED' : 'PENDING',
           error_message: isBlockedTemplate
             ? `BLOCKED_TEMPLATE_NOT_CONFIGURED: Central WhatsApp requires approved Meta Utility Template ${templateNameForRecord}`
