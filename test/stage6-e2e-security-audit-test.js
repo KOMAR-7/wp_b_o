@@ -33,6 +33,7 @@ const {
 const {
   resolveTenantByPhoneNumberId
 } = require('../src/services/tenant.service');
+const { assertSafeCleanupFilter } = require('../src/utils/test-guard');
 
 const TEST_PORT = 3997;
 let serverInstance;
@@ -192,66 +193,37 @@ function buildMetaWebhookPayload({
 }
 
 async function cleanupTestData() {
-  await prisma.outboxMessage.deleteMany({
-    where: {
-      OR: [
-        { recipient_phone: { startsWith: '9196' } },
-        { recipient_phone: { startsWith: '9197' } },
-        { recipient_phone: { startsWith: '9198' } },
-        { recipient_phone: { startsWith: '9199' } }
-      ]
-    }
-  });
+  const testTenantIds = [TENANT_A_ID, TENANT_B_ID];
 
-  await prisma.orderNotification.deleteMany({
-    where: {
-      OR: [
-        { recipient_phone: { startsWith: '9196' } },
-        { recipient_phone: { startsWith: '9197' } },
-        { recipient_phone: { startsWith: '9198' } },
-        { recipient_phone: { startsWith: '9199' } }
-      ]
-    }
-  });
+  // 1. OrderNotification (child of Order)
+  const notifFilter = { restaurant_id: { in: testTenantIds } };
+  assertSafeCleanupFilter(notifFilter, 'OrderNotification');
+  await prisma.orderNotification.deleteMany({ where: notifFilter }).catch(() => {});
 
-  await prisma.order.deleteMany({
-    where: {
-      OR: [
-        { customer_phone: { startsWith: '9196' } },
-        { customer_phone: { startsWith: '9197' } },
-        { customer_phone: { startsWith: '9198' } },
-        { customer_phone: { startsWith: '9199' } }
-      ]
-    }
-  });
+  // 2. OutboxMessage
+  const outboxFilter = { restaurant_id: { in: testTenantIds } };
+  assertSafeCleanupFilter(outboxFilter, 'OutboxMessage');
+  await prisma.outboxMessage.deleteMany({ where: outboxFilter }).catch(() => {});
 
-  await prisma.conversationSession.deleteMany({
-    where: {
-      OR: [
-        { customer_phone: { startsWith: '9196' } },
-        { customer_phone: { startsWith: '9197' } },
-        { customer_phone: { startsWith: '9198' } },
-        { customer_phone: { startsWith: '9199' } }
-      ]
-    }
-  });
+  // 3. Order (parent)
+  const orderFilter = { restaurant_id: { in: testTenantIds } };
+  assertSafeCleanupFilter(orderFilter, 'Order');
+  await prisma.order.deleteMany({ where: orderFilter }).catch(() => {});
 
-  await prisma.savedAddress.deleteMany({
-    where: {
-      OR: [
-        { customer_phone: { startsWith: '9196' } },
-        { customer_phone: { startsWith: '9197' } },
-        { customer_phone: { startsWith: '9198' } },
-        { customer_phone: { startsWith: '9199' } }
-      ]
-    }
-  });
+  // 4. ConversationSession
+  const sessionFilter = { restaurant_id: { in: testTenantIds } };
+  assertSafeCleanupFilter(sessionFilter, 'ConversationSession');
+  await prisma.conversationSession.deleteMany({ where: sessionFilter }).catch(() => {});
 
-  await prisma.webhookEvent.deleteMany({
-    where: {
-      event_key: { startsWith: 'wamid.AUDIT_' }
-    }
-  });
+  // 5. SavedAddress
+  const addressFilter = { restaurant_id: { in: testTenantIds } };
+  assertSafeCleanupFilter(addressFilter, 'SavedAddress');
+  await prisma.savedAddress.deleteMany({ where: addressFilter }).catch(() => {});
+
+  // 6. WebhookEvent
+  const eventFilter = { event_key: { startsWith: 'wamid.AUDIT_' } };
+  assertSafeCleanupFilter(eventFilter, 'WebhookEvent');
+  await prisma.webhookEvent.deleteMany({ where: eventFilter }).catch(() => {});
 }
 
 // =========================================================================
@@ -887,7 +859,7 @@ async function runAuditSuite() {
 
     // 4. Concurrent Outbox Workers (FOR UPDATE SKIP LOCKED)
     // Seed two pending outbox messages
-    await prisma.outboxMessage.create({
+    const concMsgA = await prisma.outboxMessage.create({
       data: {
         restaurant_id: TENANT_A_ID,
         recipient_phone: '919844000001',
@@ -897,7 +869,7 @@ async function runAuditSuite() {
         status: 'PENDING'
       }
     });
-    await prisma.outboxMessage.create({
+    const concMsgB = await prisma.outboxMessage.create({
       data: {
         restaurant_id: TENANT_A_ID,
         recipient_phone: '919844000002',
@@ -916,8 +888,8 @@ async function runAuditSuite() {
     assert(claimedWorkerA.length === 1 && claimedWorkerB.length === 1, 'Reliability: Both workers claimed 1 message');
     assert(claimedWorkerA[0].id !== claimedWorkerB[0].id, 'Reliability: Workers claimed completely distinct messages (Zero double-claiming)');
 
-    // Clean up test outbox before crash recovery test to isolate message queue
-    await prisma.outboxMessage.deleteMany({ where: { status: 'PENDING' } });
+    // Clean up specific test concurrent messages
+    await prisma.outboxMessage.deleteMany({ where: { id: { in: [concMsgA.id, concMsgB.id] } } });
 
     // 5. Worker Crash & Lease Expiration Recovery
     // Simulate expired lease on message
@@ -941,7 +913,7 @@ async function runAuditSuite() {
     });
 
     const recoveryClaim = await prisma.$transaction(tx =>
-      claimPendingOutboxMessages(tx, { limit: 1, workerId: 'recovery_worker' })
+      claimPendingOutboxMessages(tx, { limit: 10, workerId: 'recovery_worker' })
     );
 
     assert(recoveryClaim.some(m => m.id === expiredLeaseMsg.id), 'Reliability: Fresh worker successfully reclaimed expired lease message');
@@ -957,8 +929,8 @@ async function runAuditSuite() {
     assert(staleUpdate.updated === false, 'Reliability: Stale worker update rejected');
     assert(staleUpdate.reason === 'FENCED_OUT', 'Reliability: Reason is FENCED_OUT');
 
-    // Clean up test outbox before timeout test to isolate message queue
-    await prisma.outboxMessage.deleteMany({ where: { status: 'PENDING' } });
+    // Clean up specific expired lease test message
+    await prisma.outboxMessage.deleteMany({ where: { id: expiredLeaseMsg.id } });
 
     // 7. Meta API Timeout & UNCERTAIN_DISPATCH
     const timeoutMsg = await prisma.outboxMessage.create({
@@ -973,7 +945,7 @@ async function runAuditSuite() {
     });
 
     const claimedTimeout = await prisma.$transaction(tx =>
-      claimPendingOutboxMessages(tx, { limit: 1, workerId: 'timeout_worker' })
+      claimPendingOutboxMessages(tx, { limit: 10, workerId: 'timeout_worker' })
     );
     const targetTimeoutMsg = claimedTimeout.find(m => m.id === timeoutMsg.id);
 
@@ -986,8 +958,8 @@ async function runAuditSuite() {
 
     assert(timeoutResult.status === 'UNCERTAIN_DISPATCH', 'Reliability: Timeout marked as UNCERTAIN_DISPATCH (Zero blind retries)');
 
-    // Clean up test outbox before failure test
-    await prisma.outboxMessage.deleteMany({ where: { status: 'PENDING' } });
+    // Clean up specific timeout test message
+    await prisma.outboxMessage.deleteMany({ where: { id: timeoutMsg.id } });
 
     // 8. Meta Non-Retryable 4xx Error
     const failMsg = await prisma.outboxMessage.create({
@@ -1002,7 +974,7 @@ async function runAuditSuite() {
     });
 
     const claimedFail = await prisma.$transaction(tx =>
-      claimPendingOutboxMessages(tx, { limit: 1, workerId: 'fail_worker' })
+      claimPendingOutboxMessages(tx, { limit: 10, workerId: 'fail_worker' })
     );
     const targetFailMsg = claimedFail.find(m => m.id === failMsg.id);
 
@@ -1014,6 +986,9 @@ async function runAuditSuite() {
     });
 
     assert(failResult.status === 'FAILED', 'Reliability: Non-retryable error transitioned status to FAILED');
+
+    // Clean up specific fail test message
+    await prisma.outboxMessage.deleteMany({ where: { id: failMsg.id } });
 
 
     // ---------------------------------------------------------------------

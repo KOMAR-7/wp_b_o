@@ -146,10 +146,6 @@ async function runStagingVerificationTests() {
     await prisma.centralWhatsAppAccount.deleteMany({
       where: { phone_number_id: centralPhoneId }
     });
-    await prisma.centralWhatsAppAccount.updateMany({
-      where: { is_active: true },
-      data: { is_active: false }
-    });
 
     // Seed Active Central Account with Approved Templates
     const centralAccount = await createCentralAccount({
@@ -177,6 +173,7 @@ async function runStagingVerificationTests() {
         access_token_encrypted: 'mock_token_rest_a',
         is_active: true,
         tenant_status: 'ACTIVE',
+        central_account_id: centralAccount.id,
         internal_notes: formatInternalNotes('Restaurant A Notes', {
           optedIn: true,
           templateApproved: true,
@@ -197,6 +194,7 @@ async function runStagingVerificationTests() {
         access_token_encrypted: 'mock_token_rest_b',
         is_active: true,
         tenant_status: 'ACTIVE',
+        central_account_id: centralAccount.id,
         internal_notes: formatInternalNotes('Restaurant B Notes', {
           optedIn: true,
           templateApproved: true,

@@ -667,8 +667,10 @@ async function runR68TestSuite() {
     assert(dbAlpha.is_active === false, 'Scenario 36: is_active set to false on soft deletion');
 
     // 37. Verify permanent deletion only when safe and unreferenced
-    // Clean all test outbox messages to test unreferenced delete
-    await prisma.outboxMessage.deleteMany({ where: { sender_channel: 'CENTRAL' } });
+    // Clean test restaurant outbox messages to ensure test isolation
+    if (createdRestaurantIds.length > 0) {
+      await prisma.outboxMessage.deleteMany({ where: { restaurant_id: { in: createdRestaurantIds } } });
+    }
 
     const freshPhoneId = '999' + Date.now().toString().slice(-9);
     const freshUnreferenced = await createCentralAccount({
@@ -811,8 +813,10 @@ async function runR68TestSuite() {
   } finally {
     console.log('\n--- Cleaning up R6.8 test fixtures ---');
     if (createdOrderIds.length > 0) {
-      await prisma.outboxMessage.deleteMany({ where: { idempotency_key: { contains: 'order' } } }).catch(() => {});
       await prisma.orderNotification.deleteMany({ where: { order_id: { in: createdOrderIds } } }).catch(() => {});
+      if (createdRestaurantIds.length > 0) {
+        await prisma.outboxMessage.deleteMany({ where: { restaurant_id: { in: createdRestaurantIds } } }).catch(() => {});
+      }
       await prisma.order.deleteMany({ where: { id: { in: createdOrderIds } } }).catch(() => {});
     }
     if (createdRestaurantIds.length > 0) {

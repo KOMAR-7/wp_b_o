@@ -26,6 +26,7 @@ const {
   parseOwnerAction,
   normalizePhone
 } = require('../src/services/order.service');
+const { assertSafeCleanupFilter } = require('../src/utils/test-guard');
 
 async function runStage5DecisionTests() {
   console.log('\n============================================================');
@@ -111,11 +112,7 @@ async function runStage5DecisionTests() {
   }
 
   try {
-    // 1. Initial database cleanup and tenant resolution
-    await prisma.outboxMessage.deleteMany({});
-    await prisma.orderNotification.deleteMany({});
-    await prisma.order.deleteMany({});
-
+    // 1. Resolve test tenants (no broad or destructive table wiping)
     const tenantA = await prisma.restaurant.findUnique({
       where: { phone_number_id: '111111111111111' }
     });
@@ -750,15 +747,31 @@ async function runStage5DecisionTests() {
       if (server) {
         await new Promise(resolve => server.close(resolve));
       }
-      if (createdWebhookEventKeys.length > 0) {
-        await prisma.webhookEvent.deleteMany({
-          where: { event_key: { in: createdWebhookEventKeys } }
-        });
-      }
       if (createdOrderIds.length > 0) {
-        await prisma.order.deleteMany({
-          where: { id: { in: createdOrderIds } }
-        });
+        // 1. Delete child order notifications first
+        const notifFilter = { order_id: { in: createdOrderIds } };
+        assertSafeCleanupFilter(notifFilter, 'OrderNotification');
+        await prisma.orderNotification.deleteMany({ where: notifFilter }).catch(() => {});
+
+        // 2. Delete child outbox decision messages
+        const outboxKeys = createdOrderIds.map(id => [
+          `customer_decision_${id}_accept`,
+          `customer_decision_${id}_reject`,
+          `customer_ack_${id}`
+        ]).flat();
+        const outboxFilter = { idempotency_key: { in: outboxKeys } };
+        assertSafeCleanupFilter(outboxFilter, 'OutboxMessage');
+        await prisma.outboxMessage.deleteMany({ where: outboxFilter }).catch(() => {});
+
+        // 3. Delete parent orders
+        const orderFilter = { id: { in: createdOrderIds } };
+        assertSafeCleanupFilter(orderFilter, 'Order');
+        await prisma.order.deleteMany({ where: orderFilter }).catch(() => {});
+      }
+      if (createdWebhookEventKeys.length > 0) {
+        const eventFilter = { event_key: { in: createdWebhookEventKeys } };
+        assertSafeCleanupFilter(eventFilter, 'WebhookEvent');
+        await prisma.webhookEvent.deleteMany({ where: eventFilter }).catch(() => {});
       }
     } catch (cleanupErr) {
       console.warn('Cleanup warning:', cleanupErr.message);

@@ -32,6 +32,7 @@ const {
   claimPendingOutboxMessages,
   updateOutboxResult
 } = require('../src/services/outbox.service');
+const { assertSafeCleanupFilter } = require('../src/utils/test-guard');
 
 async function runStage5CustomerNotificationTests() {
   console.log('\n============================================================');
@@ -130,11 +131,7 @@ async function runStage5CustomerNotificationTests() {
   }
 
   try {
-    // Clean up before starting
-    await prisma.outboxMessage.deleteMany({});
-    await prisma.orderNotification.deleteMany({});
-    await prisma.order.deleteMany({});
-
+    // Resolve seeded test restaurants (no destructive whole-table wipes)
     const tenantA = await prisma.restaurant.findUnique({
       where: { phone_number_id: '111111111111111' }
     });
@@ -694,11 +691,11 @@ async function runStage5CustomerNotificationTests() {
       };
 
       const dispatchRes = await dispatchPendingOutboxMessages({
-        batchSize: 1,
+        batchSize: 10,
         customSender: mockE2ESender
       });
 
-      assert(dispatchRes.succeededCount === 1, 'Customer notification outbox message dispatched successfully');
+      assert(dispatchRes.succeededCount >= 1, 'Customer notification outbox message dispatched successfully');
 
       const dispatchedRow = await prisma.outboxMessage.findUnique({ where: { id: customerOutboxRow.id } });
       assert(dispatchedRow.status === 'ACCEPTED', 'Customer notification status transitioned to ACCEPTED');
@@ -713,25 +710,25 @@ async function runStage5CustomerNotificationTests() {
       if (server) {
         await new Promise(resolve => server.close(resolve));
       }
-      if (createdWebhookEventKeys.length > 0) {
-        await prisma.webhookEvent.deleteMany({
-          where: { event_key: { in: createdWebhookEventKeys } }
-        });
-      }
       if (createdNotificationIds.length > 0) {
-        await prisma.orderNotification.deleteMany({
-          where: { id: { in: createdNotificationIds } }
-        });
+        const notifFilter = { id: { in: createdNotificationIds } };
+        assertSafeCleanupFilter(notifFilter, 'OrderNotification');
+        await prisma.orderNotification.deleteMany({ where: notifFilter }).catch(() => {});
       }
       if (createdOutboxIds.length > 0) {
-        await prisma.outboxMessage.deleteMany({
-          where: { id: { in: createdOutboxIds } }
-        });
+        const outboxFilter = { id: { in: createdOutboxIds } };
+        assertSafeCleanupFilter(outboxFilter, 'OutboxMessage');
+        await prisma.outboxMessage.deleteMany({ where: outboxFilter }).catch(() => {});
       }
       if (createdOrderIds.length > 0) {
-        await prisma.order.deleteMany({
-          where: { id: { in: createdOrderIds } }
-        });
+        const orderFilter = { id: { in: createdOrderIds } };
+        assertSafeCleanupFilter(orderFilter, 'Order');
+        await prisma.order.deleteMany({ where: orderFilter }).catch(() => {});
+      }
+      if (createdWebhookEventKeys.length > 0) {
+        const eventFilter = { event_key: { in: createdWebhookEventKeys } };
+        assertSafeCleanupFilter(eventFilter, 'WebhookEvent');
+        await prisma.webhookEvent.deleteMany({ where: eventFilter }).catch(() => {});
       }
     } catch (cleanupErr) {
       console.warn('Cleanup warning:', cleanupErr.message);
