@@ -39,6 +39,8 @@ const {
   claimPendingOutboxMessages,
   updateOutboxResult
 } = require('../src/services/outbox.service');
+const { createCentralAccount } = require('../src/services/central-whatsapp.service');
+const { generateSignedOwnerCallback } = require('../src/utils/callback-signer');
 
 async function runStage5CustomerNotificationTests() {
   console.log('\n============================================================');
@@ -63,6 +65,7 @@ async function runStage5CustomerNotificationTests() {
   const createdOutboxIds = [];
   const createdNotificationIds = [];
   const createdWebhookEventKeys = [];
+  const createdCentralAccountIds = [];
 
   let server;
   let serverPort;
@@ -625,15 +628,31 @@ async function runStage5CustomerNotificationTests() {
 
     // 15. End-to-end HTTP POST owner Accept creates customer notification outbox row
     {
-      // Clean pending outbox
+      // Clean pending outbox for tenantA
+      assertSafeCleanupFilter({ restaurant_id: tenantA.id }, 'OutboxMessage');
       await prisma.outboxMessage.updateMany({
-        where: { status: 'PENDING' },
+        where: { restaurant_id: tenantA.id, status: 'PENDING' },
         data: { status: 'SUPPRESSED' }
       });
+
+      // Ensure active central account exists for owner decisions in Central routing mode
+      const centralPhoneId = '999888777000';
+      let stage5CentralAccount = await prisma.centralWhatsAppAccount.findFirst({ where: { is_active: true } });
+      if (!stage5CentralAccount) {
+        stage5CentralAccount = await createCentralAccount({
+          phoneNumberId: centralPhoneId,
+          wabaId: 'waba_stage5_test',
+          accessToken: 'EAAB_test_stage5_token',
+          displayPhoneNumber: '+91 99988 87770',
+          isActive: true
+        });
+        createdCentralAccountIds.push(stage5CentralAccount.id);
+      }
 
       const e2eOrder = await createTestOrder(tenantA.id, { customerPhone: '919812300456' });
       const wamidDecision = `wamid.E2E_DECISION_${Date.now()}`;
       createdWebhookEventKeys.push(wamidDecision);
+      const signedAcceptPayload = generateSignedOwnerCallback('ACCEPT', e2eOrder.id, tenantA.id);
 
       const payload = {
         object: 'whatsapp_business_account',
@@ -645,8 +664,8 @@ async function runStage5CustomerNotificationTests() {
                 value: {
                   messaging_product: 'whatsapp',
                   metadata: {
-                    display_phone_number: '15550001',
-                    phone_number_id: tenantA.phone_number_id
+                    display_phone_number: stage5CentralAccount.display_phone_number || '+91 99988 87770',
+                    phone_number_id: stage5CentralAccount.phone_number_id
                   },
                   messages: [
                     {
@@ -657,7 +676,7 @@ async function runStage5CustomerNotificationTests() {
                       interactive: {
                         type: 'button_reply',
                         button_reply: {
-                          id: `OWNER_ACCEPT:${e2eOrder.id}`,
+                          id: signedAcceptPayload,
                           title: '✅ Accept Order'
                         }
                       }
@@ -742,6 +761,13 @@ async function runStage5CustomerNotificationTests() {
           prisma.order,
           { id: { in: createdOrderIds } },
           'Order'
+        );
+      }
+      if (createdCentralAccountIds.length > 0) {
+        await safeDeleteMany(
+          prisma.centralWhatsAppAccount,
+          { id: { in: createdCentralAccountIds } },
+          'CentralWhatsAppAccount'
         );
       }
     } catch (cleanupErr) {
