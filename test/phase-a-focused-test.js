@@ -388,6 +388,7 @@ runTest('Test 9c: Subprocess test requiring config/database with approved test D
 
 runTest('Test 9d: Subprocess production startup with production DB succeeds without interference', () => {
   const childScript = `
+    delete process.env.RESTOPRO_TEST_MODE;
     process.env.NODE_ENV = 'production';
     process.env.DATABASE_URL = 'postgresql://whatsapp_only_user:prod_pass@127.0.0.1:5432/restopro_whatsapp_only';
     const prisma = require('./src/config/database');
@@ -398,14 +399,15 @@ runTest('Test 9d: Subprocess production startup with production DB succeeds with
     process.exit(1);
   `;
 
+  const childEnv = { ...process.env };
+  delete childEnv.RESTOPRO_TEST_MODE;
+  childEnv.NODE_ENV = 'production';
+  childEnv.npm_lifecycle_event = 'start';
+
   const result = spawnSync('node', ['-e', childScript], {
     cwd: path.resolve(__dirname, '..'),
     encoding: 'utf8',
-    env: {
-      ...process.env,
-      NODE_ENV: 'production',
-      npm_lifecycle_event: 'start'
-    }
+    env: childEnv
   });
 
   assert.strictEqual(result.status, 0, `Subprocess must exit with code 0. Error: ${result.stderr}`);
