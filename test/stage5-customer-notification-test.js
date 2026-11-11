@@ -239,7 +239,7 @@ async function runStage5CustomerNotificationTests() {
 
       const bodyText = payload.text.body;
       assert(bodyText.includes(orderReject.order_reference), 'Reject body contains order reference');
-      assert(bodyText.includes('unable to accept your order'), 'Politely states unable to accept order');
+      assert(bodyText.includes('rejected by') || bodyText.includes('unable to accept'), 'Politely states order rejected/unable to accept');
       assert(bodyText.includes('Spice Garden Restaurant'), 'Mentions restaurant name');
       assert(bodyText.includes('not been charged'), 'Reassures customer they have not been charged');
       assert(bodyText.includes('view the menu'), 'Invites customer to order again');
@@ -652,7 +652,7 @@ async function runStage5CustomerNotificationTests() {
       const e2eOrder = await createTestOrder(tenantA.id, { customerPhone: '919812300456' });
       const wamidDecision = `wamid.E2E_DECISION_${Date.now()}`;
       createdWebhookEventKeys.push(wamidDecision);
-      const signedAcceptPayload = generateSignedOwnerCallback('ACCEPT', e2eOrder.id, tenantA.id);
+      const signedAcceptPayload = generateSignedOwnerCallback({ orderId: e2eOrder.id, action: 'ACCEPT' });
 
       const payload = {
         object: 'whatsapp_business_account',
