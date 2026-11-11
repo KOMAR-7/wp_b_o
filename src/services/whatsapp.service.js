@@ -19,6 +19,35 @@ const META_GRAPH_VERSION = 'v21.0';
 const DEFAULT_TIMEOUT_MS = 10000;
 
 /**
+ * Sanitizes a template parameter string to comply with Meta WhatsApp Cloud API rules:
+ * - Disallows newline (\r, \n) and tab (\t) characters (replaces them with a single space).
+ * - Disallows 4 or more consecutive spaces (collapses to 3 spaces).
+ * - Trims leading and trailing whitespace.
+ * - Enforces non-empty string requirement (falls back to a safe non-empty default).
+ * - Enforces maximum parameter length (1024 characters).
+ *
+ * @param {*} value - Raw parameter value
+ * @param {string} [fallback='N/A'] - Fallback value if null, undefined, or empty
+ * @param {number} [maxLength=1024] - Maximum length allowed by Meta
+ * @returns {string} Sanitized single-line parameter string
+ */
+function sanitizeTemplateParam(value, fallback = 'N/A', maxLength = 1024) {
+  if (value === null || value === undefined) {
+    return String(fallback).slice(0, maxLength);
+  }
+  let str = String(value);
+  // Replace newlines, carriage returns, and tabs with a single space
+  str = str.replace(/[\r\n\t]+/g, ' ');
+  // Collapse 4 or more consecutive spaces to 3 spaces (Meta rejects >= 4 consecutive spaces)
+  str = str.replace(/[ ]{4,}/g, '   ');
+  str = str.trim();
+  if (!str) {
+    str = String(fallback).trim() || 'N/A';
+  }
+  return str.slice(0, maxLength);
+}
+
+/**
  * Builds the Meta interactive button or template payload for owner order notifications.
  * Supports both interactive buttons (within 24h customer window) and approved templates (outside window).
  *
@@ -68,28 +97,37 @@ function buildOwnerNotificationPayload({
   }
 
   // 1. Customer Name {{1}}
-  const customerName = (order.customer_name && String(order.customer_name).trim()) || 'Customer';
+  const rawCustomerName = (order.customer_name && String(order.customer_name).trim()) || 'Customer';
+  const customerName = sanitizeTemplateParam(rawCustomerName, 'Customer', 1024);
 
   // 2. Customer Phone {{2}}
-  const customerPhone = (order.customer_phone && String(order.customer_phone).trim()) || 'N/A';
+  const rawCustomerPhone = (order.customer_phone && String(order.customer_phone).trim()) || 'N/A';
+  const customerPhone = sanitizeTemplateParam(rawCustomerPhone, 'N/A', 1024);
 
   // 3. Order Type {{3}}
   const isDelivery = order.order_type === 'DELIVERY';
-  const orderType = isDelivery ? 'Delivery' : 'Takeaway (Self-Pickup)';
+  const rawOrderType = isDelivery ? 'Delivery' : 'Takeaway (Self-Pickup)';
+  const orderType = sanitizeTemplateParam(rawOrderType, 'Delivery', 1024);
 
   // 4. Delivery Address {{4}}
-  const deliveryAddress = (isDelivery && order.address_snapshot && String(order.address_snapshot).trim())
-    ? String(order.address_snapshot).trim().slice(0, 1024)
+  const rawDeliveryAddress = (isDelivery && order.address_snapshot && String(order.address_snapshot).trim())
+    ? String(order.address_snapshot).trim()
     : (isDelivery ? 'Address not provided' : 'Takeaway (Self-Pickup)');
+  const deliveryAddress = sanitizeTemplateParam(
+    rawDeliveryAddress,
+    isDelivery ? 'Address not provided' : 'Takeaway (Self-Pickup)',
+    1024
+  );
 
-  // 5. Formatted Items (dynamic, supporting multiple items) {{5}}
-  const formattedItems = items.length > 0
+  // 5. Formatted Items (dynamic, supporting multiple items on a single line for Meta template rules) {{5}}
+  const rawFormattedItems = items.length > 0
     ? items.map(item => {
         const qty = item.quantity || 1;
-        const name = item.productName || item.name || item.title || item.productRetailerId || 'Item';
+        const name = (item.productName || item.name || item.title || item.productRetailerId || 'Item').trim();
         return `${qty}x ${name}`;
-      }).join('\n').slice(0, 1024)
+      }).join(', ')
     : '1x Order Items';
+  const formattedItems = sanitizeTemplateParam(rawFormattedItems, '1x Order Items', 1024);
 
   // 6. Total Payable Amount including payment method {{6}}
   let paymentTag = '(Pay COD)';
@@ -100,7 +138,8 @@ function buildOwnerNotificationPayload({
   } else {
     paymentTag = '(Pay COD)';
   }
-  const totalWithPayment = `${currencySymbol}${total} ${paymentTag}`;
+  const rawTotalWithPayment = `${currencySymbol}${total} ${paymentTag}`;
+  const totalWithPayment = sanitizeTemplateParam(rawTotalWithPayment, `${currencySymbol}${total} (Pay COD)`, 1024);
 
   // If outside 24h window or explicitly requested: use approved Meta Utility Template format
   if (useTemplate) {
@@ -117,12 +156,12 @@ function buildOwnerNotificationPayload({
           {
             type: 'body',
             parameters: [
-              { type: 'text', text: customerName.slice(0, 1024) },
-              { type: 'text', text: customerPhone.slice(0, 1024) },
-              { type: 'text', text: orderType.slice(0, 1024) },
-              { type: 'text', text: deliveryAddress.slice(0, 1024) },
-              { type: 'text', text: formattedItems.slice(0, 1024) },
-              { type: 'text', text: totalWithPayment.slice(0, 1024) }
+              { type: 'text', text: customerName },
+              { type: 'text', text: customerPhone },
+              { type: 'text', text: orderType },
+              { type: 'text', text: deliveryAddress },
+              { type: 'text', text: formattedItems },
+              { type: 'text', text: totalWithPayment }
             ]
           },
           {
@@ -1063,6 +1102,7 @@ function buildConversationReplyPayload({ action, recipientPhone, restaurantName 
 module.exports = {
   META_GRAPH_VERSION,
   DEFAULT_TIMEOUT_MS,
+  sanitizeTemplateParam,
   buildOwnerNotificationPayload,
   buildCustomerDecisionNotificationPayload,
   buildCentralCustomerDecisionPayload,
