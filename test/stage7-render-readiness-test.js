@@ -92,23 +92,27 @@ function sendHttpRequest({
 
 async function cleanupTestData() {
   try {
+    const cleanCustomerPhone = TEST_CUSTOMER_PHONE.replace(/[^\d]/g, '');
+    const cleanOwnerPhone = TEST_OWNER_PHONE.replace(/[^\d]/g, '');
+    const allPhones = [TEST_CUSTOMER_PHONE, cleanCustomerPhone, TEST_OWNER_PHONE, cleanOwnerPhone];
+
     // 1. Delete test notifications for test phones
-    const notifFilter = { recipient_phone: { in: [TEST_CUSTOMER_PHONE, TEST_OWNER_PHONE] } };
+    const notifFilter = { recipient_phone: { in: allPhones } };
     assertSafeCleanupFilter(notifFilter, 'OrderNotification');
     await prisma.orderNotification.deleteMany({ where: notifFilter }).catch(() => {});
 
     // 2. Delete test outbox messages for test phones
-    const outboxFilter = { recipient_phone: { in: [TEST_CUSTOMER_PHONE, TEST_OWNER_PHONE] } };
+    const outboxFilter = { recipient_phone: { in: allPhones } };
     assertSafeCleanupFilter(outboxFilter, 'OutboxMessage');
     await prisma.outboxMessage.deleteMany({ where: outboxFilter }).catch(() => {});
 
     // 3. Delete test orders for test customer phone
-    const orderFilter = { customer_phone: TEST_CUSTOMER_PHONE };
+    const orderFilter = { customer_phone: { in: [TEST_CUSTOMER_PHONE, cleanCustomerPhone] } };
     assertSafeCleanupFilter(orderFilter, 'Order');
     await prisma.order.deleteMany({ where: orderFilter }).catch(() => {});
 
     // 4. Delete test conversation sessions for test customer phone
-    const sessionFilter = { customer_phone: TEST_CUSTOMER_PHONE };
+    const sessionFilter = { customer_phone: { in: [TEST_CUSTOMER_PHONE, cleanCustomerPhone] } };
     assertSafeCleanupFilter(sessionFilter, 'ConversationSession');
     await prisma.conversationSession.deleteMany({ where: sessionFilter }).catch(() => {});
 

@@ -233,6 +233,12 @@ async function cleanupTestData() {
     assertSafeCleanupFilter(outboxFilter, 'OutboxMessage');
     await prisma.outboxMessage.deleteMany({ where: outboxFilter }).catch(() => {});
   }
+  if (createdWebhookEventKeys.length > 0) {
+    const replyKeys = createdWebhookEventKeys.map(k => `reply_${k}`);
+    const replyFilter = { idempotency_key: { in: replyKeys } };
+    assertSafeCleanupFilter(replyFilter, 'OutboxMessage');
+    await prisma.outboxMessage.deleteMany({ where: replyFilter }).catch(() => {});
+  }
   if (createdCentralAccountIds.length > 0) {
     const centralFilter = { id: { in: createdCentralAccountIds } };
     assertSafeCleanupFilter(centralFilter, 'CentralWhatsAppAccount');
@@ -853,6 +859,7 @@ async function runAuditSuite() {
 
     // 1. Duplicate Webhook Deliveries (Idempotent Webhook Deduplication)
     const dupeEventKey = `wamid.AUDIT_DUPE_${Date.now()}`;
+    createdWebhookEventKeys.push(dupeEventKey);
     const dupePayload = buildMetaWebhookPayload({
       phoneNumberId: TENANT_A_PHONE_ID,
       senderPhone: '919811999901',
@@ -899,6 +906,9 @@ async function runAuditSuite() {
       confirmCustomerOrder({ restaurantId: TENANT_A_ID, customerPhone: raceCustomer, confirmationToken: raceToken })
     ]);
 
+    const raceOrder = conf1.order || conf2.order;
+    if (raceOrder) createdOrderIds.push(raceOrder.id);
+
     assert(conf1.success === true && conf2.success === true, 'Reliability: Both concurrent confirmations returned success');
     const duplicateFlags = [conf1.isDuplicate, conf2.isDuplicate].filter(Boolean);
     assert(duplicateFlags.length === 1, 'Reliability: Exactly one confirmation was first; the second was marked isDuplicate');
@@ -933,6 +943,7 @@ async function runAuditSuite() {
       customerPhone: conflictCustomer,
       confirmationToken: conflictToken
     });
+    if (conflictOrderRes.order) createdOrderIds.push(conflictOrderRes.order.id);
 
     const [decA, decB] = await Promise.all([
       processOwnerOrderDecision({ restaurantId: TENANT_A_ID, senderPhone: TENANT_A_OWNER_PHONE, orderId: conflictOrderRes.order.id, decision: 'ACCEPT' }),

@@ -86,6 +86,15 @@ async function runStage5OutboxTests() {
       throw new Error('Precondition failed: Seeded restaurants (Tenant A / B) not found.');
     }
 
+    // Suppress any pre-existing pending or uncertain messages for test tenants to ensure clean queue baseline
+    await prisma.outboxMessage.updateMany({
+      where: {
+        restaurant_id: { in: [tenantA.id, tenantB.id] },
+        status: { in: ['PENDING', 'UNCERTAIN_DISPATCH'] }
+      },
+      data: { status: 'SUPPRESSED' }
+    });
+
     const testCartPayload = {
       catalog_id: 'CAT_STAGE_51',
       product_items: [
@@ -300,6 +309,15 @@ async function runStage5OutboxTests() {
 
     // 6. Concurrent worker claims with FOR UPDATE SKIP LOCKED
     {
+      // Suppress any lingering messages to ensure clean queue for concurrency test
+      await prisma.outboxMessage.updateMany({
+        where: {
+          restaurant_id: { in: [tenantA.id, tenantB.id] },
+          status: { in: ['PENDING', 'UNCERTAIN_DISPATCH'] }
+        },
+        data: { status: 'SUPPRESSED' }
+      });
+
       // Create 2 test pending outbox messages
       const msg1 = await prisma.outboxMessage.create({
         data: {
@@ -343,6 +361,15 @@ async function runStage5OutboxTests() {
 
     // 7. Lease expiry and stale-worker fencing
     {
+      // Suppress any lingering messages to ensure fenceMsg is the sole claim candidate
+      await prisma.outboxMessage.updateMany({
+        where: {
+          restaurant_id: { in: [tenantA.id, tenantB.id] },
+          status: { in: ['PENDING', 'UNCERTAIN_DISPATCH'] }
+        },
+        data: { status: 'SUPPRESSED' }
+      });
+
       const fenceMsg = await prisma.outboxMessage.create({
         data: {
           restaurant_id: tenantA.id,
@@ -401,6 +428,15 @@ async function runStage5OutboxTests() {
 
     // 8. Successful Meta API dispatch using mock HTTP client -> status: ACCEPTED
     {
+      // Suppress any lingering messages to ensure clean queue for dispatch tests
+      await prisma.outboxMessage.updateMany({
+        where: {
+          restaurant_id: { in: [tenantA.id, tenantB.id] },
+          status: { in: ['PENDING', 'UNCERTAIN_DISPATCH'] }
+        },
+        data: { status: 'SUPPRESSED' }
+      });
+
       const successMsg = await prisma.outboxMessage.create({
         data: {
           restaurant_id: tenantA.id,
@@ -437,6 +473,14 @@ async function runStage5OutboxTests() {
 
     // 9. Meta API 400 Bad Request error handling -> status: FAILED (token redacted)
     {
+      await prisma.outboxMessage.updateMany({
+        where: {
+          restaurant_id: { in: [tenantA.id, tenantB.id] },
+          status: { in: ['PENDING', 'UNCERTAIN_DISPATCH'] }
+        },
+        data: { status: 'SUPPRESSED' }
+      });
+
       const failMsg = await prisma.outboxMessage.create({
         data: {
           restaurant_id: tenantA.id,
@@ -475,6 +519,14 @@ async function runStage5OutboxTests() {
 
     // 10. Timeout / Uncertain dispatch -> status: UNCERTAIN_DISPATCH
     {
+      await prisma.outboxMessage.updateMany({
+        where: {
+          restaurant_id: { in: [tenantA.id, tenantB.id] },
+          status: { in: ['PENDING', 'UNCERTAIN_DISPATCH'] }
+        },
+        data: { status: 'SUPPRESSED' }
+      });
+
       const timeoutMsg = await prisma.outboxMessage.create({
         data: {
           restaurant_id: tenantA.id,
@@ -507,10 +559,24 @@ async function runStage5OutboxTests() {
       const updatedTimeoutRow = await prisma.outboxMessage.findUnique({ where: { id: timeoutMsg.id } });
       assert(updatedTimeoutRow.status === 'UNCERTAIN_DISPATCH', 'Outbox status transitioned to UNCERTAIN_DISPATCH');
       assert(updatedTimeoutRow.last_error.includes('timed out'), 'last_error records timeout message');
+
+      // Suppress timeoutMsg so it does not linger in the queue for subsequent tests
+      await prisma.outboxMessage.update({
+        where: { id: timeoutMsg.id },
+        data: { status: 'SUPPRESSED' }
+      });
     }
 
     // 11. Bounded retry on 5xx errors
     {
+      await prisma.outboxMessage.updateMany({
+        where: {
+          restaurant_id: { in: [tenantA.id, tenantB.id] },
+          status: { in: ['PENDING', 'UNCERTAIN_DISPATCH'] }
+        },
+        data: { status: 'SUPPRESSED' }
+      });
+
       const retryMsg = await prisma.outboxMessage.create({
         data: {
           restaurant_id: tenantA.id,
