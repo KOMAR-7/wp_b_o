@@ -567,6 +567,15 @@ async function runAuditSuite() {
     // ---------------------------------------------------------------------
     console.log('\n--- TEST GROUP 3: Complete 12-Step End-to-End Workflow Test ---');
 
+    // Suppress any pre-existing pending outbox messages to ensure clean worker dispatch queue
+    await prisma.outboxMessage.updateMany({
+      where: {
+        restaurant_id: { in: [TENANT_A_ID, TENANT_B_ID] },
+        status: 'PENDING'
+      },
+      data: { status: 'SUPPRESSED' }
+    });
+
     const e2eCustomer = '919711223344';
 
     // Step 1: Customer sends "Hi"
