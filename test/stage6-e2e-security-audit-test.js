@@ -34,6 +34,8 @@ const {
 const {
   resolveTenantByPhoneNumberId
 } = require('../src/services/tenant.service');
+const { createCentralAccount } = require('../src/services/central-whatsapp.service');
+const { generateSignedOwnerCallback } = require('../src/utils/callback-signer');
 const { assertSafeCleanupFilter } = require('../src/utils/test-guard');
 
 const TEST_PORT = 3997;
@@ -199,6 +201,7 @@ const createdOutboxIds = [];
 const createdSessionIds = [];
 const createdAddressIds = [];
 const createdWebhookEventKeys = [];
+const createdCentralAccountIds = [];
 
 async function cleanupTestData() {
   // 1. OrderNotification (child of Order)
@@ -215,7 +218,13 @@ async function cleanupTestData() {
 
   // 2. OutboxMessage
   if (createdOrderIds.length > 0) {
-    const outboxByOrderFilter = { order_id: { in: createdOrderIds } };
+    const idempotencyKeys = createdOrderIds.flatMap(id => [
+      `owner_notif_${id}`,
+      `customer_decision_${id}_accept`,
+      `customer_decision_${id}_reject`,
+      `customer_ack_${id}`
+    ]);
+    const outboxByOrderFilter = { idempotency_key: { in: idempotencyKeys } };
     assertSafeCleanupFilter(outboxByOrderFilter, 'OutboxMessage');
     await prisma.outboxMessage.deleteMany({ where: outboxByOrderFilter }).catch(() => {});
   }
@@ -223,6 +232,11 @@ async function cleanupTestData() {
     const outboxFilter = { id: { in: createdOutboxIds } };
     assertSafeCleanupFilter(outboxFilter, 'OutboxMessage');
     await prisma.outboxMessage.deleteMany({ where: outboxFilter }).catch(() => {});
+  }
+  if (createdCentralAccountIds.length > 0) {
+    const centralFilter = { id: { in: createdCentralAccountIds } };
+    assertSafeCleanupFilter(centralFilter, 'CentralWhatsAppAccount');
+    await prisma.centralWhatsAppAccount.deleteMany({ where: centralFilter }).catch(() => {});
   }
 
   // 3. Order (parent)
@@ -711,6 +725,7 @@ async function runAuditSuite() {
       where: { confirmation_token: e2eToken }
     });
     assert(confirmedOrder !== null, 'Step 8: Order record created in PostgreSQL');
+    createdOrderIds.push(confirmedOrder.id);
     assert(confirmedOrder.status === 'PENDING_RESTAURANT_CONFIRMATION', 'Step 8: Initial order status is PENDING_RESTAURANT_CONFIRMATION');
     assert(Number(confirmedOrder.total_amount) === 540, 'Step 8: Order total is 540.00');
 
@@ -756,8 +771,21 @@ async function runAuditSuite() {
     assert(dispatchedOwnerOutbox.payload.meta_message_id !== undefined, 'Step 9: meta_message_id persisted in payload');
 
     // Step 10: Owner Taps Accept Button via Webhook
+    let stage6CentralAccount = await prisma.centralWhatsAppAccount.findFirst({ where: { is_active: true } });
+    if (!stage6CentralAccount) {
+      stage6CentralAccount = await createCentralAccount({
+        phoneNumberId: '999888777000',
+        wabaId: 'waba_stage6_test',
+        accessToken: 'EAAB_test_stage6_token',
+        displayPhoneNumber: '+91 99988 87770',
+        isActive: true
+      });
+      createdCentralAccountIds.push(stage6CentralAccount.id);
+    }
+
+    const signedAcceptPayload = generateSignedOwnerCallback({ orderId: confirmedOrder.id, action: 'ACCEPT' });
     const step10Payload = buildMetaWebhookPayload({
-      phoneNumberId: TENANT_A_PHONE_ID,
+      phoneNumberId: stage6CentralAccount.phone_number_id,
       senderPhone: TENANT_A_OWNER_PHONE,
       messageId: `wamid.AUDIT_STEP10_${Date.now()}`,
       messageType: 'interactive',
@@ -765,7 +793,7 @@ async function runAuditSuite() {
         interactive: {
           type: 'button_reply',
           button_reply: {
-            id: `OWNER_ACCEPT:${confirmedOrder.id}`,
+            id: signedAcceptPayload,
             title: '✅ Accept Order'
           }
         }
