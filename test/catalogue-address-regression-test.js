@@ -46,7 +46,7 @@ const {
 } = require('../src/services/order.service');
 const {
   buildOwnerNotificationPayload,
-  buildCustomerDecisionReplyPayload
+  buildCustomerDecisionNotificationPayload
 } = require('../src/services/whatsapp.service');
 const {
   handleIncomingMessage,
@@ -479,6 +479,7 @@ async function runRegressionTestSuite() {
       const mockOrder = {
         id: 'mock-order-id-123',
         order_reference: 'RP-261111-TEST',
+        customer_phone: '+919152115523',
         restaurant_id: tenant.id,
         order_type: 'DELIVERY',
         address_snapshot: '5004, Ksa, 245a, Maulana Azad Rd, near nagori clinic, Ashadham Colony, Madanpura, Mumbai, Maharashtra 400008, India',
@@ -500,7 +501,7 @@ async function runRegressionTestSuite() {
         currency: 'INR'
       };
 
-      const reply = buildCustomerDecisionReplyPayload({
+      const reply = buildCustomerDecisionNotificationPayload({
         order: mockOrder,
         decision: 'ACCEPT',
         restaurantName: tenant.name
@@ -516,7 +517,7 @@ async function runRegressionTestSuite() {
         'Customer decision text contains delivery address exactly once'
       );
 
-      pass('REG-CAT-10: buildCustomerDecisionReplyPayload produces clean items and non-duplicated address');
+      pass('REG-CAT-10: buildCustomerDecisionNotificationPayload produces clean items and non-duplicated address');
     }
 
     // Test 17: Tenant Isolation Guarantee — Tenant A mappings never leak to Tenant B
