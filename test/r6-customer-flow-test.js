@@ -20,6 +20,7 @@
  * 15. Invalid location payload does not advance conversation
  * 16. Order confirmation flow completes cleanly with new address structure
  */
+require('./load-test-env');
 
 const assert = require('assert');
 const prisma = require('../src/config/database');

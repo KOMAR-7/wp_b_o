@@ -16,6 +16,7 @@
  * - Full webhook pipeline integration (HTTP POST with HMAC verification and event deduplication)
  * - Zero token or credential leakage in logs
  */
+require('./load-test-env');
 const crypto = require('crypto');
 const http = require('http');
 const prisma = require('../src/config/database');

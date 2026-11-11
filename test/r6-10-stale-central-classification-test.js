@@ -10,6 +10,7 @@
  * F. Multi-restaurant central routing through Central XYZ continues working.
  * G. Tenant isolation remains intact.
  */
+require('./load-test-env');
 
 const assert = require('assert');
 const http = require('http');

@@ -10,6 +10,7 @@
  * Test F: Owner rejects through Central: works.
  * Test G: Multi-tenant isolation remains intact.
  */
+require('./load-test-env');
 
 const assert = require('assert');
 const http = require('http');

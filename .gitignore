@@ -6,12 +6,22 @@ yarn-error.log*
 
 # Environment secrets
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+!.env.test.example
+
+# Certificates & Private Keys
+*.pem
+*.key
+*.crt
+*.cert
+*.pfx
+*.p12
 
 # Logs
 logs/
 *.log
+pm2-*.log
 
 # Operating System Files
 .DS_Store
@@ -27,7 +37,10 @@ Thumbs.db
 scratch/
 test-output/
 
-# Database Backups
+# Database Backups & Dumps
 backups/
 *.dump
+*.sql
+*.sql.gz
+*.bak
 

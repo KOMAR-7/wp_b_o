@@ -13,6 +13,7 @@
  * 9. WhatsApp API failure -> Outbox retry and status tracking behavior (PENDING retry vs FAILED terminal).
  * 10. Multi-tenant credential isolation -> Tenant A's outbox messages strictly resolve Tenant A's credentials.
  */
+require('./load-test-env');
 
 const crypto = require('crypto');
 const http = require('http');

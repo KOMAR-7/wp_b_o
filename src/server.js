@@ -16,12 +16,15 @@ if (process.env.ENABLE_BACKGROUND_WORKER !== 'false' && process.env.NODE_ENV !==
   logger.info('In-process NotificationWorker started alongside Express HTTP server.');
 }
 
-const server = app.listen(config.port, '0.0.0.0', () => {
-  logger.info(`RESTOPRO Backend listening on port ${config.port}`, {
+const bindHost = process.env.HOST || (config.nodeEnv === 'production' ? '127.0.0.1' : '0.0.0.0');
+
+const server = app.listen(config.port, bindHost, () => {
+  logger.info(`RESTOPRO Backend listening on ${bindHost}:${config.port}`, {
     environment: config.nodeEnv,
+    host: bindHost,
     port: config.port,
-    webhookEndpoint: `http://localhost:${config.port}/api/webhook`,
-    healthEndpoint: `http://localhost:${config.port}/health`
+    webhookEndpoint: `http://${bindHost}:${config.port}/api/webhook`,
+    healthEndpoint: `http://${bindHost}:${config.port}/health`
   });
 });
 
@@ -67,6 +70,21 @@ process.on('message', (msg) => {
   if (msg === 'shutdown' || msg === 'SIGTERM') {
     gracefulShutdown('PM2_SHUTDOWN');
   }
+});
+
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled Promise Rejection', {
+    reason: reason instanceof Error ? reason.message : String(reason),
+    stack: reason instanceof Error ? reason.stack : undefined
+  });
+});
+
+process.on('uncaughtException', (err) => {
+  logger.error('Uncaught Exception thrown', {
+    error: err.message,
+    stack: err.stack
+  });
+  gracefulShutdown('UNCAUGHT_EXCEPTION');
 });
 
 server.worker = worker;

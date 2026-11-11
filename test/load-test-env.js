@@ -30,21 +30,25 @@ const {
   ALLOWED_TEST_EMAIL_REGEX,
   isProductionOrRemoteDatabase,
   assertTestDatabase,
+  assertTestDatabaseWhitelist,
   assertSafeTestAccount,
   assertSafeCleanupFilter,
-  getDatabaseName
+  getDatabaseName,
+  getDatabaseHost
 } = require('../src/utils/test-guard');
 
-// Enforce database safety check on initialization
-assertTestDatabase('Test Environment Loader');
+// Enforce strict test database whitelist on initialization (restopro_test only)
+assertTestDatabaseWhitelist('Test Environment Loader');
 
 module.exports = {
   PROTECTED_REAL_ADMIN_EMAILS,
   ALLOWED_TEST_EMAIL_REGEX,
   isProductionOrRemoteDatabase,
   assertTestDatabase,
+  assertTestDatabaseWhitelist,
   assertSafeTestAccount,
   assertSafeCleanupFilter,
-  getDatabaseName
+  getDatabaseName,
+  getDatabaseHost
 };
 

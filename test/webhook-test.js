@@ -2,6 +2,7 @@
  * RESTOPRO — Stage 1.5: Comprehensive Webhook, Security & Parsing Audit Test Suite
  * Tests every edge case, security boundary, malformed input, and multi-event scenario.
  */
+require('./load-test-env');
 const crypto = require('crypto');
 const http = require('http');
 const path = require('path');

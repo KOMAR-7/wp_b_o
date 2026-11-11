@@ -13,6 +13,7 @@
  * 9. Restaurant CRUD operations remain functional.
  * 10. Unauthorized users cannot access central account configuration.
  */
+require('./load-test-env');
 process.env.NODE_ENV = 'test';
 process.env.PORT = '4989';
 

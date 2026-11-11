@@ -16,6 +16,7 @@
  * 6. Dynamic template name resolution from environment with default restopro_order_alert.
  * 7. Template configuration service specifications and definitions.
  */
+require('./load-test-env');
 const assert = require('assert');
 const { buildOwnerNotificationPayload } = require('../src/services/whatsapp.service');
 const {

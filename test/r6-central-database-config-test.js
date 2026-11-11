@@ -11,6 +11,7 @@
  * - Existing outbox message backward compatibility
  * - Restaurant tenant isolation & multi-tenant integrity
  */
+require('./load-test-env');
 const prisma = require('../src/config/database');
 const config = require('../src/config/env');
 const {

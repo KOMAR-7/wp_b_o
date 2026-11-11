@@ -2,6 +2,7 @@
  * RESTOPRO — Stage 4.0: Schema Migration & Database Prerequisites Test Suite
  * Verifies confirmation_token, webhook worker lease fields, and durable outbox_messages queue.
  */
+require('./load-test-env');
 const crypto = require('crypto');
 const prisma = require('../src/config/database');
 

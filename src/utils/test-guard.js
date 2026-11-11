@@ -56,6 +56,22 @@ function getDatabaseName(dbUrl = process.env.DATABASE_URL || '') {
 }
 
 /**
+ * Extracts the database hostname from DATABASE_URL.
+ * @param {string} dbUrl
+ * @returns {string}
+ */
+function getDatabaseHost(dbUrl = process.env.DATABASE_URL || '') {
+  if (!dbUrl) return 'unknown';
+  try {
+    const parsed = new URL(dbUrl);
+    return (parsed.hostname || '').toLowerCase();
+  } catch {
+    const match = dbUrl.match(/@([^:/]+)/);
+    return match ? match[1].toLowerCase() : 'unknown';
+  }
+}
+
+/**
  * Checks whether the active database connection string points to Render, remote cloud host, or Production.
  * @returns {boolean}
  */
@@ -125,6 +141,50 @@ function assertTestDatabase(context = 'Test execution') {
     throw new Error(
       `[TEST GUARD] CRITICAL SAFETY VIOLATION: ${context} attempted against production or remote database "${dbName}". ` +
       `Automated tests and scripts are strictly forbidden from mutating production databases. Set ALLOW_REMOTE_TEST_EXECUTION=true only for controlled verification.`
+    );
+  }
+}
+
+/**
+ * Strict whitelist guard: rejects every database except the dedicated local "restopro_test" database.
+ * Enforces:
+ * 1. NODE_ENV !== 'production'
+ * 2. Host must be local (localhost / 127.0.0.1 / host.docker.internal / postgres)
+ * 3. Database name MUST be 'restopro_test'
+ *
+ * @param {string} context - Description of the test or operation
+ */
+function assertTestDatabaseWhitelist(context = 'Test execution') {
+  if (process.env.ALLOW_REMOTE_TEST_EXECUTION === 'true') {
+    console.warn(
+      `[TEST GUARD WARNING] Executing test with explicit ALLOW_REMOTE_TEST_EXECUTION=true: ${context}`
+    );
+    return;
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      `[TEST GUARD] CRITICAL SAFETY VIOLATION: ${context} attempted while NODE_ENV=production. ` +
+      `Automated tests are strictly forbidden from running in production mode.`
+    );
+  }
+
+  const dbUrl = process.env.DATABASE_URL || '';
+  const dbName = getDatabaseName(dbUrl).toLowerCase();
+  const dbHost = getDatabaseHost(dbUrl).toLowerCase();
+
+  const isLocalHost =
+    dbHost === 'localhost' ||
+    dbHost === '127.0.0.1' ||
+    dbHost === '0.0.0.0' ||
+    dbHost === 'host.docker.internal' ||
+    dbHost === 'postgres' ||
+    dbHost === '';
+
+  if (!isLocalHost || dbName !== 'restopro_test') {
+    throw new Error(
+      `[TEST GUARD] CRITICAL SAFETY VIOLATION: ${context} rejected database "${dbName}" on host "${dbHost}". ` +
+      `The test loader rejects every database except the dedicated local "restopro_test" database. Set ALLOW_REMOTE_TEST_EXECUTION=true only for controlled verification.`
     );
   }
 }
@@ -233,8 +293,10 @@ module.exports = {
   PRODUCTION_DATABASE_NAMES,
   REMOTE_HOST_INDICATORS,
   getDatabaseName,
+  getDatabaseHost,
   isProductionOrRemoteDatabase,
   assertTestDatabase,
+  assertTestDatabaseWhitelist,
   assertSafeTestAccount,
   assertSafeCleanupFilter
 };

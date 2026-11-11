@@ -8,6 +8,7 @@
  * 4. Reliability, Concurrency & Failure Recovery (Double webhooks, race conditions, worker lease fencing, timeouts, rollbacks)
  * 5. Operational & Production Health Verification
  */
+require('./load-test-env');
 const crypto = require('crypto');
 const http = require('http');
 const prisma = require('../src/config/database');

@@ -14,6 +14,7 @@ process.env.NODE_ENV = 'test';
  * 7. Duplicate webhook race condition does not produce an unexpected error or duplicate processing.
  * 8. Failed outbound messages do not silently disappear (remain durable in PostgreSQL with error audit trail).
  */
+require('./load-test-env');
 
 const assert = require('assert');
 const crypto = require('crypto');

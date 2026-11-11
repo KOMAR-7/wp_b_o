@@ -15,6 +15,7 @@
  * - Meta API timeout handling -> UNCERTAIN_DISPATCH
  * - Bounded retry / backoff on 5xx errors -> attempt increment & exhaustion to FAILED
  */
+require('./load-test-env');
 const crypto = require('crypto');
 const http = require('http');
 const prisma = require('../src/config/database');

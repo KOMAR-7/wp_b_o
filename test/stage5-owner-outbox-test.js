@@ -17,6 +17,7 @@
  * - No DB transaction held during HTTP dispatch
  * - Token and secret redaction
  */
+require('./load-test-env');
 const crypto = require('crypto');
 const prisma = require('../src/config/database');
 const config = require('../src/config/env');

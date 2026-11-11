@@ -29,6 +29,7 @@
  * 25. Customer confirmation receipt (order reference acknowledgment)
  * 26. Meta API failures and retry behavior (transient 503 vs terminal 400)
  */
+require('./load-test-env');
 
 const crypto = require('crypto');
 const http = require('http');

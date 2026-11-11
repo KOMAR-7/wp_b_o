@@ -12,6 +12,7 @@
  * 8. State Recovery Across Worker/Server Restarts (ST7-04)
  * 9. Database Outage & Transaction Rollback Resilience (ST7-05)
  */
+require('./load-test-env');
 
 const http = require('http');
 const fs = require('fs');

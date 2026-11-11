@@ -55,8 +55,8 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Database readiness check endpoint
-app.get('/health/ready', async (req, res) => {
+// Database readiness check endpoint (supports both /health/ready and /ready)
+app.get(['/health/ready', '/ready'], async (req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
     return res.status(200).json({

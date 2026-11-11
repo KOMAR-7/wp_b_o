@@ -12,6 +12,7 @@ process.env.NODE_ENV = 'test';
  * F-06: Actual Function Integration Coverage (Mocked axios 401 in sendWhatsAppMessage, confirmCustomerOrder with consent/revoked)
  * F-08: Signed Owner Callback IDs (HMAC-SHA256, constant-time verification, tampering, expiration, replay idempotency, cross-tenant defense)
  */
+require('./load-test-env');
 
 const http = require('http');
 const prisma = require('../src/config/database');

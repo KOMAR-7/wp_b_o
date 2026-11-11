@@ -3,6 +3,7 @@
  * Executes the HTTP server and Prisma client in an isolated child process,
  * triggers signal handlers, and verifies clean disconnection.
  */
+require('./load-test-env');
 const { spawn } = require('child_process');
 const path = require('path');
 const http = require('http');

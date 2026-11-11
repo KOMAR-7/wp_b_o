@@ -3,6 +3,7 @@
  * Verifies finite state machine, whitelist validation, contextual re-prompts,
  * 2-reminder limit, silent fallback, session isolation, and webhook integration.
  */
+require('./load-test-env');
 const crypto = require('crypto');
 const http = require('http');
 const prisma = require('../src/config/database');

@@ -8,6 +8,7 @@
  * - Frontend Static Asset & Single Page Serving
  * - Security Guards & Audit Trail Verification
  */
+require('./load-test-env');
 
 const http = require('http');
 const prisma = require('../src/config/database');

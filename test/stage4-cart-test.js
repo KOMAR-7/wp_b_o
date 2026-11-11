@@ -3,6 +3,7 @@
  * Verifies catalogue cart parsing, decimal-safe arithmetic, defensive validation,
  * session cart replacement, confirmation token regeneration, and webhook pipeline.
  */
+require('./load-test-env');
 const crypto = require('crypto');
 const http = require('http');
 const prisma = require('../src/config/database');

@@ -8,6 +8,7 @@
  * Group D: Activation, Deactivation & Safe Deletion (Scenarios 29-38)
  * Group E: Regression & Production Safety (Scenarios 39-50)
  */
+require('./load-test-env');
 process.env.NODE_ENV = 'test';
 
 const http = require('http');

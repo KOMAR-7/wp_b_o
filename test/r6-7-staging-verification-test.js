@@ -38,6 +38,7 @@
  * - Failed template deliveries safely recorded in outbox & order_notifications
  * - Zero duplicate notifications created
  */
+require('./load-test-env');
 
 process.env.NODE_ENV = 'test';
 process.env.NOTIFICATION_ROUTING_MODE = 'CENTRAL';

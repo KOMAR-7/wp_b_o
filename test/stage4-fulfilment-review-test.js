@@ -11,6 +11,7 @@
  * - Customer cancellation handler (ST4-14) with session reset to IDLE
  * - Multi-tenant and customer isolation
  */
+require('./load-test-env');
 const crypto = require('crypto');
 const http = require('http');
 const prisma = require('../src/config/database');

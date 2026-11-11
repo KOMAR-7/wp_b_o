@@ -2,6 +2,7 @@
  * RESTOPRO — Stage 2: Multi-Tenant Database, Schema & Idempotency Test Suite
  * Verifies PostgreSQL models, constraints, tenant isolation, and durable webhook ingestion.
  */
+require('./load-test-env');
 const crypto = require('crypto');
 const http = require('http');
 const prisma = require('../src/config/database');

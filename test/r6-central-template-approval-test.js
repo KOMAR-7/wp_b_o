@@ -11,6 +11,7 @@
  * 7. Classified failure (BLOCKED_TEMPLATE_NOT_CONFIGURED) without fallback to restaurant
  * 8. LEGACY mode behavior preservation
  */
+require('./load-test-env');
 process.env.NODE_ENV = 'test';
 
 const crypto = require('crypto');

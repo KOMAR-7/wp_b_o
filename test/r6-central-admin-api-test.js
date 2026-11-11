@@ -11,6 +11,7 @@
  * 7. PATCH /api/admin/central-account/templates/:templateName (independent status updates)
  * 8. AuditLog creation for central account operations
  */
+require('./load-test-env');
 process.env.NODE_ENV = 'test';
 
 const http = require('http');

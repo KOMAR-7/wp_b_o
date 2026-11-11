@@ -1,3 +1,4 @@
+require('./load-test-env');
 process.env.NODE_ENV = 'test';
 process.env.NOTIFICATION_ROUTING_MODE = 'CENTRAL';
 process.env.OWNER_TEMPLATE_APPROVED = 'true';

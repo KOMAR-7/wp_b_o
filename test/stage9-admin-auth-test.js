@@ -11,6 +11,7 @@
  * 7. Absence of public admin registration routes (HTTP 404)
  * 8. Database schema: Subscriptions, Payments, AuditLogs, and Restaurant extensions
  */
+require('./load-test-env');
 
 const http = require('http');
 const prisma = require('../src/config/database');

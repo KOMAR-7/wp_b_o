@@ -9,6 +9,7 @@
  * 5. GET /health/ready recovers to HTTP 200 when database connectivity is restored
  * 6. Standard security headers enforced on /health/ready
  */
+require('./load-test-env');
 
 const http = require('http');
 const app = require('../src/app');

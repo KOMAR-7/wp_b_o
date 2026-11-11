@@ -8,6 +8,7 @@
  * - Explicit consent flow (Yes persists, No does not persist, duplicate prevention)
  * - Session integrity, 2-reminder cap, and concurrent safety
  */
+require('./load-test-env');
 const crypto = require('crypto');
 const http = require('http');
 const prisma = require('../src/config/database');

@@ -14,6 +14,7 @@
  * Multi-Tenant: Concurrent multi-restaurant routing through Central XYZ with strict cross-tenant rejection.
  * Legacy Removal: Restaurant ABC strictly rejects any direct owner decision callbacks.
  */
+require('./load-test-env');
 
 const assert = require('assert');
 const http = require('http');
