@@ -33,6 +33,8 @@ const {
   parseOwnerAction,
   normalizePhone
 } = require('../src/services/order.service');
+const { createCentralAccount } = require('../src/services/central-whatsapp.service');
+const { generateSignedOwnerCallback } = require('../src/utils/callback-signer');
 
 async function runStage5DecisionTests() {
   console.log('\n============================================================');
@@ -55,6 +57,7 @@ async function runStage5DecisionTests() {
   // Cleanup tracking
   const createdOrderIds = [];
   const createdWebhookEventKeys = [];
+  const createdCentralAccountIds = [];
 
   let server;
   let serverPort;
@@ -524,6 +527,20 @@ async function runStage5DecisionTests() {
       const wamidAccept = `wamid.OWNER_ACCEPT_${Date.now()}`;
       createdWebhookEventKeys.push(wamidAccept);
 
+      let stage5CentralAccount = await prisma.centralWhatsAppAccount.findFirst({ where: { is_active: true } });
+      if (!stage5CentralAccount) {
+        stage5CentralAccount = await createCentralAccount({
+          phoneNumberId: '999888777000',
+          wabaId: 'waba_stage5_test',
+          accessToken: 'EAAB_test_stage5_token',
+          displayPhoneNumber: '+91 99988 87770',
+          isActive: true
+        });
+        createdCentralAccountIds.push(stage5CentralAccount.id);
+      }
+
+      const signedAcceptPayload = generateSignedOwnerCallback({ orderId: webhookOrder.id, action: 'ACCEPT' });
+
       const payload = {
         object: 'whatsapp_business_account',
         entry: [
@@ -534,8 +551,8 @@ async function runStage5DecisionTests() {
                 value: {
                   messaging_product: 'whatsapp',
                   metadata: {
-                    display_phone_number: '15550001',
-                    phone_number_id: tenantA.phone_number_id
+                    display_phone_number: stage5CentralAccount.display_phone_number || '+91 99988 87770',
+                    phone_number_id: stage5CentralAccount.phone_number_id
                   },
                   messages: [
                     {
@@ -546,7 +563,7 @@ async function runStage5DecisionTests() {
                       interactive: {
                         type: 'button_reply',
                         button_reply: {
-                          id: `OWNER_ACCEPT:${webhookOrder.id}`,
+                          id: signedAcceptPayload,
                           title: '✅ Accept Order'
                         }
                       }
@@ -580,6 +597,20 @@ async function runStage5DecisionTests() {
       const wamidReject = `wamid.OWNER_REJECT_${Date.now()}`;
       createdWebhookEventKeys.push(wamidReject);
 
+      let stage5CentralAccount = await prisma.centralWhatsAppAccount.findFirst({ where: { is_active: true } });
+      if (!stage5CentralAccount) {
+        stage5CentralAccount = await createCentralAccount({
+          phoneNumberId: '999888777000',
+          wabaId: 'waba_stage5_test',
+          accessToken: 'EAAB_test_stage5_token',
+          displayPhoneNumber: '+91 99988 87770',
+          isActive: true
+        });
+        createdCentralAccountIds.push(stage5CentralAccount.id);
+      }
+
+      const signedRejectPayload = generateSignedOwnerCallback({ orderId: webhookRejectOrder.id, action: 'REJECT' });
+
       const payload = {
         object: 'whatsapp_business_account',
         entry: [
@@ -590,8 +621,8 @@ async function runStage5DecisionTests() {
                 value: {
                   messaging_product: 'whatsapp',
                   metadata: {
-                    display_phone_number: '15550001',
-                    phone_number_id: tenantA.phone_number_id
+                    display_phone_number: stage5CentralAccount.display_phone_number || '+91 99988 87770',
+                    phone_number_id: stage5CentralAccount.phone_number_id
                   },
                   messages: [
                     {
@@ -602,7 +633,7 @@ async function runStage5DecisionTests() {
                       interactive: {
                         type: 'button_reply',
                         button_reply: {
-                          id: `OWNER_REJECT:${webhookRejectOrder.id}`,
+                          id: signedRejectPayload,
                           title: '❌ Reject Order'
                         }
                       }
@@ -753,6 +784,13 @@ async function runStage5DecisionTests() {
       if (server) {
         await new Promise(resolve => server.close(resolve));
       }
+      if (createdCentralAccountIds.length > 0) {
+        await safeDeleteMany(
+          prisma.centralWhatsAppAccount,
+          { id: { in: createdCentralAccountIds } },
+          'CentralWhatsAppAccount'
+        );
+      }
       if (createdWebhookEventKeys.length > 0) {
         await safeDeleteMany(
           prisma.webhookEvent,
@@ -761,6 +799,18 @@ async function runStage5DecisionTests() {
         );
       }
       if (createdOrderIds.length > 0) {
+        const idempotencyKeys = createdOrderIds.flatMap(id => [
+          `owner_notif_${id}`,
+          `customer_decision_${id}_accept`,
+          `customer_decision_${id}_reject`,
+          `customer_ack_${id}`
+        ]);
+        await safeDeleteMany(
+          prisma.outboxMessage,
+          { idempotency_key: { in: idempotencyKeys } },
+          'OutboxMessage'
+        ).catch(() => {});
+
         await safeDeleteMany(
           prisma.order,
           { id: { in: createdOrderIds } },
