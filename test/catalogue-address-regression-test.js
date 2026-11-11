@@ -426,6 +426,7 @@ async function runRegressionTestSuite() {
     // Test 15: Owner Notification Template {{5}} parameter formatting
     {
       const mockOrder = {
+        id: 'mock-order-uuid-test-15',
         order_reference: 'RP-261111-TEST',
         customer_name: 'Madi Khan',
         customer_phone: '+919152115523',
