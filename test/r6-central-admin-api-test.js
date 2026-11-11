@@ -19,7 +19,7 @@ const crypto = require('crypto');
 const app = require('../src/app');
 const prisma = require('../src/config/database');
 const { hashPassword } = require('../src/utils/password');
-const { assertSafeTestAccount } = require('../src/utils/test-guard');
+const { assertSafeTestAccount, assertSafeCleanupFilter } = require('../src/utils/test-guard');
 const { decryptToken } = require('../src/utils/crypto');
 
 const TEST_PORT = 4991;
@@ -95,6 +95,7 @@ async function runTestSuite() {
 
   const createdAdminIds = [];
   const createdCentralAccountIds = [];
+  let previouslyActiveAccount = null;
 
   const testPhoneIdA = '999888777333';
   const testPhoneIdB = '999888777444';
@@ -104,6 +105,7 @@ async function runTestSuite() {
 
   try {
     // Teardown pre-existing fixtures
+    assertSafeCleanupFilter({ phone_number_id: { in: [testPhoneIdA, testPhoneIdB] } }, 'CentralWhatsAppAccount');
     await prisma.centralWhatsAppAccount.deleteMany({
       where: { phone_number_id: { in: [testPhoneIdA, testPhoneIdB] } }
     });
@@ -216,11 +218,14 @@ async function runTestSuite() {
     // -------------------------------------------------------------
     console.log('\n--- TEST GROUP 2: Empty / Missing Configuration Handling ---');
 
-    // Deactivate any pre-existing active DB accounts for clean baseline test
-    await prisma.centralWhatsAppAccount.updateMany({
-      where: { is_active: true },
-      data: { is_active: false }
-    });
+    // Safely capture and deactivate currently active DB account for baseline test
+    previouslyActiveAccount = await prisma.centralWhatsAppAccount.findFirst({ where: { is_active: true } });
+    if (previouslyActiveAccount) {
+      await prisma.centralWhatsAppAccount.update({
+        where: { id: previouslyActiveAccount.id },
+        data: { is_active: false }
+      });
+    }
 
     const emptyGet = await httpRequest({
       method: 'GET',
@@ -530,14 +535,24 @@ async function runTestSuite() {
     console.log('\n--- Cleaning up test artifacts ---');
     try {
       if (createdCentralAccountIds.length > 0) {
+        assertSafeCleanupFilter({ id: { in: createdCentralAccountIds } }, 'CentralWhatsAppAccount');
         await prisma.centralWhatsAppAccount.deleteMany({
           where: { id: { in: createdCentralAccountIds } }
         });
       }
       if (createdAdminIds.length > 0) {
+        assertSafeCleanupFilter({ admin_id: { in: createdAdminIds } }, 'AdminSession');
         await prisma.adminSession.deleteMany({ where: { admin_id: { in: createdAdminIds } } });
+        assertSafeCleanupFilter({ admin_user_id: { in: createdAdminIds } }, 'AuditLog');
         await prisma.auditLog.deleteMany({ where: { admin_user_id: { in: createdAdminIds } } });
+        assertSafeCleanupFilter({ id: { in: createdAdminIds } }, 'AdminUser');
         await prisma.adminUser.deleteMany({ where: { id: { in: createdAdminIds } } });
+      }
+      if (previouslyActiveAccount) {
+        await prisma.centralWhatsAppAccount.update({
+          where: { id: previouslyActiveAccount.id },
+          data: { is_active: true }
+        }).catch(() => {});
       }
       if (server) {
         await new Promise((resolve) => server.close(resolve));

@@ -23,6 +23,7 @@ const config = require('../src/config/env');
 const app = require('../src/app');
 const { generateSignedOwnerCallback } = require('../src/utils/callback-signer');
 const { setTemplateApprovalForTesting, resetTemplateApprovalsForTesting } = require('../src/services/template-config.service');
+const { assertSafeCleanupFilter } = require('../src/utils/test-guard');
 
 const TEST_PORT = 4991;
 const BASE_URL = `http://127.0.0.1:${TEST_PORT}`;
@@ -110,6 +111,10 @@ async function runSuite() {
     const OWNER_B_PHONE = restB.owner_phone;    // +919811122233
 
     // Pre-test cleanup of test phones to ensure clean slate
+    assertSafeCleanupFilter({
+      restaurant_id: { in: [restA.id, restB.id] },
+      recipient_phone: { in: TEST_PHONES }
+    }, 'OutboxMessage');
     await prisma.outboxMessage.deleteMany({
       where: {
         restaurant_id: { in: [restA.id, restB.id] },
@@ -1047,22 +1052,29 @@ async function runSuite() {
           `customer_decision_${id}_reject`,
           `customer_ack_${id}`
         ]);
+        const outboxFilter = {
+          OR: [
+            { idempotency_key: { in: idempotencyKeys } },
+            { restaurant_id: { in: [restA.id, restB.id] }, recipient_phone: { in: TEST_PHONES } }
+          ]
+        };
+        assertSafeCleanupFilter(outboxFilter, 'OutboxMessage');
         await prisma.outboxMessage.deleteMany({
-          where: {
-            OR: [
-              { idempotency_key: { in: idempotencyKeys } },
-              { restaurant_id: { in: [restA.id, restB.id] }, recipient_phone: { in: TEST_PHONES } }
-            ]
-          }
+          where: outboxFilter
         }).catch((e) => console.warn('Outbox cleanup warning:', e.message));
+
+        assertSafeCleanupFilter({ order_id: { in: createdOrderIds } }, 'OrderNotification');
         await prisma.orderNotification.deleteMany({
           where: { order_id: { in: createdOrderIds } }
         }).catch((e) => console.warn('Notification cleanup warning:', e.message));
+
+        assertSafeCleanupFilter({ id: { in: createdOrderIds } }, 'Order');
         await prisma.order.deleteMany({
           where: { id: { in: createdOrderIds } }
         }).catch((e) => console.warn('Order cleanup warning:', e.message));
       }
       if (createdSessionIds.length > 0) {
+        assertSafeCleanupFilter({ id: { in: createdSessionIds } }, 'ConversationSession');
         await prisma.conversationSession.deleteMany({
           where: { id: { in: createdSessionIds } }
         }).catch(() => {});

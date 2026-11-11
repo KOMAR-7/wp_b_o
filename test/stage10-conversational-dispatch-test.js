@@ -33,6 +33,7 @@ const {
   sendWhatsAppMessage
 } = require('../src/services/whatsapp.service');
 const { handleIncomingMessage, processIncomingCart } = require('../src/services/conversation.service');
+const { assertSafeCleanupFilter } = require('../src/utils/test-guard');
 
 const TEST_PORT = 4991;
 let server;
@@ -781,21 +782,25 @@ async function runStage10Tests() {
     console.log('\n--- Cleaning up Stage 10 test artifacts ---');
     try {
       if (createdOutboxIds.length > 0) {
+        assertSafeCleanupFilter({ id: { in: createdOutboxIds } }, 'OutboxMessage');
         await prisma.outboxMessage.deleteMany({
           where: { id: { in: createdOutboxIds } }
         });
       }
       if (createdOrderIds.length > 0) {
+        assertSafeCleanupFilter({ id: { in: createdOrderIds } }, 'Order');
         await prisma.order.deleteMany({
           where: { id: { in: createdOrderIds } }
         });
       }
       if (createdSessionIds.length > 0) {
+        assertSafeCleanupFilter({ id: { in: createdSessionIds } }, 'ConversationSession');
         await prisma.conversationSession.deleteMany({
           where: { id: { in: createdSessionIds } }
         });
       }
       if (createdRestaurantIds.length > 0) {
+        assertSafeCleanupFilter({ id: { in: createdRestaurantIds } }, 'Restaurant');
         await prisma.restaurant.deleteMany({
           where: { id: { in: createdRestaurantIds } }
         });

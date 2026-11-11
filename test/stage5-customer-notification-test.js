@@ -15,10 +15,16 @@
  * - Meta API timeout handling -> UNCERTAIN_DISPATCH
  * - Bounded retry / backoff on 5xx errors -> attempt increment & exhaustion to FAILED
  */
-require('./load-test-env');
 const crypto = require('crypto');
 const http = require('http');
 const prisma = require('../src/config/database');
+const { assertSafeCleanupFilter } = require('../src/utils/test-guard');
+
+async function safeDeleteMany(delegate, where, entity) {
+  assertSafeCleanupFilter(where, entity);
+  return delegate.deleteMany({ where });
+}
+
 const config = require('../src/config/env');
 const app = require('../src/app');
 const {
@@ -33,7 +39,6 @@ const {
   claimPendingOutboxMessages,
   updateOutboxResult
 } = require('../src/services/outbox.service');
-const { assertSafeCleanupFilter } = require('../src/utils/test-guard');
 
 async function runStage5CustomerNotificationTests() {
   console.log('\n============================================================');
@@ -132,7 +137,7 @@ async function runStage5CustomerNotificationTests() {
   }
 
   try {
-    // Resolve seeded test restaurants (no destructive whole-table wipes)
+    // Preserve existing records; cleanup is limited to tracked test artifacts.
     const tenantA = await prisma.restaurant.findUnique({
       where: { phone_number_id: '111111111111111' }
     });
@@ -692,11 +697,11 @@ async function runStage5CustomerNotificationTests() {
       };
 
       const dispatchRes = await dispatchPendingOutboxMessages({
-        batchSize: 10,
+        batchSize: 1,
         customSender: mockE2ESender
       });
 
-      assert(dispatchRes.succeededCount >= 1, 'Customer notification outbox message dispatched successfully');
+      assert(dispatchRes.succeededCount === 1, 'Customer notification outbox message dispatched successfully');
 
       const dispatchedRow = await prisma.outboxMessage.findUnique({ where: { id: customerOutboxRow.id } });
       assert(dispatchedRow.status === 'ACCEPTED', 'Customer notification status transitioned to ACCEPTED');
@@ -711,25 +716,33 @@ async function runStage5CustomerNotificationTests() {
       if (server) {
         await new Promise(resolve => server.close(resolve));
       }
+      if (createdWebhookEventKeys.length > 0) {
+        await safeDeleteMany(
+          prisma.webhookEvent,
+          { event_key: { in: createdWebhookEventKeys } },
+          'WebhookEvent'
+        );
+      }
       if (createdNotificationIds.length > 0) {
-        const notifFilter = { id: { in: createdNotificationIds } };
-        assertSafeCleanupFilter(notifFilter, 'OrderNotification');
-        await prisma.orderNotification.deleteMany({ where: notifFilter }).catch(() => {});
+        await safeDeleteMany(
+          prisma.orderNotification,
+          { id: { in: createdNotificationIds } },
+          'OrderNotification'
+        );
       }
       if (createdOutboxIds.length > 0) {
-        const outboxFilter = { id: { in: createdOutboxIds } };
-        assertSafeCleanupFilter(outboxFilter, 'OutboxMessage');
-        await prisma.outboxMessage.deleteMany({ where: outboxFilter }).catch(() => {});
+        await safeDeleteMany(
+          prisma.outboxMessage,
+          { id: { in: createdOutboxIds } },
+          'OutboxMessage'
+        );
       }
       if (createdOrderIds.length > 0) {
-        const orderFilter = { id: { in: createdOrderIds } };
-        assertSafeCleanupFilter(orderFilter, 'Order');
-        await prisma.order.deleteMany({ where: orderFilter }).catch(() => {});
-      }
-      if (createdWebhookEventKeys.length > 0) {
-        const eventFilter = { event_key: { in: createdWebhookEventKeys } };
-        assertSafeCleanupFilter(eventFilter, 'WebhookEvent');
-        await prisma.webhookEvent.deleteMany({ where: eventFilter }).catch(() => {});
+        await safeDeleteMany(
+          prisma.order,
+          { id: { in: createdOrderIds } },
+          'Order'
+        );
       }
     } catch (cleanupErr) {
       console.warn('Cleanup warning:', cleanupErr.message);

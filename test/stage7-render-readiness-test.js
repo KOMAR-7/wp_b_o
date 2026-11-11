@@ -21,6 +21,7 @@ const crypto = require('crypto');
 const prisma = require('../src/config/database');
 const config = require('../src/config/env');
 const app = require('../src/app');
+const { assertSafeCleanupFilter } = require('../src/utils/test-guard');
 
 const { NotificationWorker } = require('../src/jobs/notification-worker');
 const { cleanupExpiredSessions } = require('../src/jobs/session-cleanup');
@@ -91,40 +92,30 @@ function sendHttpRequest({
 
 async function cleanupTestData() {
   try {
-    // Delete test notifications
-    await prisma.orderNotification.deleteMany({
-      where: {
-        recipient_phone: { in: [TEST_CUSTOMER_PHONE, TEST_OWNER_PHONE] }
-      }
-    });
+    // 1. Delete test notifications for test phones
+    const notifFilter = { recipient_phone: { in: [TEST_CUSTOMER_PHONE, TEST_OWNER_PHONE] } };
+    assertSafeCleanupFilter(notifFilter, 'OrderNotification');
+    await prisma.orderNotification.deleteMany({ where: notifFilter }).catch(() => {});
 
-    // Delete test outbox messages
-    await prisma.outboxMessage.deleteMany({
-      where: {
-        recipient_phone: { in: [TEST_CUSTOMER_PHONE, TEST_OWNER_PHONE] }
-      }
-    });
+    // 2. Delete test outbox messages for test phones
+    const outboxFilter = { recipient_phone: { in: [TEST_CUSTOMER_PHONE, TEST_OWNER_PHONE] } };
+    assertSafeCleanupFilter(outboxFilter, 'OutboxMessage');
+    await prisma.outboxMessage.deleteMany({ where: outboxFilter }).catch(() => {});
 
-    // Delete test orders
-    await prisma.order.deleteMany({
-      where: {
-        customer_phone: TEST_CUSTOMER_PHONE
-      }
-    });
+    // 3. Delete test orders for test customer phone
+    const orderFilter = { customer_phone: TEST_CUSTOMER_PHONE };
+    assertSafeCleanupFilter(orderFilter, 'Order');
+    await prisma.order.deleteMany({ where: orderFilter }).catch(() => {});
 
-    // Delete test conversation sessions
-    await prisma.conversationSession.deleteMany({
-      where: {
-        customer_phone: TEST_CUSTOMER_PHONE
-      }
-    });
+    // 4. Delete test conversation sessions for test customer phone
+    const sessionFilter = { customer_phone: TEST_CUSTOMER_PHONE };
+    assertSafeCleanupFilter(sessionFilter, 'ConversationSession');
+    await prisma.conversationSession.deleteMany({ where: sessionFilter }).catch(() => {});
 
-    // Delete test webhook events
-    await prisma.webhookEvent.deleteMany({
-      where: {
-        event_key: { startsWith: 'evt_stage7_' }
-      }
-    });
+    // 5. Delete test webhook events with stage 7 prefix
+    const eventFilter = { event_key: { startsWith: 'evt_stage7_' } };
+    assertSafeCleanupFilter(eventFilter, 'WebhookEvent');
+    await prisma.webhookEvent.deleteMany({ where: eventFilter }).catch(() => {});
   } catch (err) {
     console.warn('[CLEANUP] Warning during cleanup:', err.message);
   }
@@ -375,6 +366,7 @@ async function runStage7Tests() {
     assert(activeAfter !== null, 'Session Cleanup: Active non-expired session was preserved');
 
     // Clean up active session
+    assertSafeCleanupFilter({ customer_phone: activeSessionPhone }, 'ConversationSession');
     await prisma.conversationSession.delete({
       where: {
         restaurant_id_customer_phone: {
@@ -655,6 +647,7 @@ async function runStage7Tests() {
     assert(sessionAfterReboot.state.fulfilment === 'DELIVERY', 'State Recovery: Session metadata fully preserved');
 
     // Clean up resilient session
+    assertSafeCleanupFilter({ customer_phone: resilientCustomerPhone }, 'ConversationSession');
     await prisma.conversationSession.delete({
       where: {
         restaurant_id_customer_phone: {

@@ -20,6 +20,7 @@ const {
   buildCentralCustomerDecisionPayload
 } = require('../src/services/whatsapp.service');
 const { generateSignedOwnerCallback } = require('../src/utils/callback-signer');
+const { assertSafeCleanupFilter } = require('../src/utils/test-guard');
 
 let passed = 0;
 let failed = 0;
@@ -51,15 +52,21 @@ async function runTests() {
   const ownerAPhone = '919871112222';
   const ownerBPhone = '919872223333';
 
+  let previouslyActiveAccount = null;
+
   try {
     // Clean up any stale test accounts
+    assertSafeCleanupFilter({ phone_number_id: centralPhoneId }, 'CentralWhatsAppAccount');
     await prisma.centralWhatsAppAccount.deleteMany({
       where: { phone_number_id: centralPhoneId }
     });
-    await prisma.centralWhatsAppAccount.updateMany({
-      where: { is_active: true },
-      data: { is_active: false }
-    });
+    previouslyActiveAccount = await prisma.centralWhatsAppAccount.findFirst({ where: { is_active: true } });
+    if (previouslyActiveAccount) {
+      await prisma.centralWhatsAppAccount.update({
+        where: { id: previouslyActiveAccount.id },
+        data: { is_active: false }
+      });
+    }
 
     // 1. Seed Active Central Account
     const centralAccount = await createCentralAccount({
@@ -387,17 +394,28 @@ async function runTests() {
   } finally {
     console.log('\n--- Cleaning up R6.6 Dispatch test artifacts ---');
     if (createdOutboxIds.length > 0) {
+      assertSafeCleanupFilter({ id: { in: createdOutboxIds } }, 'OutboxMessage');
       await prisma.outboxMessage.deleteMany({ where: { id: { in: createdOutboxIds } } });
     }
-    await prisma.orderNotification.deleteMany({ where: { order_id: { in: createdOrderIds } } });
     if (createdOrderIds.length > 0) {
+      assertSafeCleanupFilter({ order_id: { in: createdOrderIds } }, 'OrderNotification');
+      await prisma.orderNotification.deleteMany({ where: { order_id: { in: createdOrderIds } } });
+      assertSafeCleanupFilter({ id: { in: createdOrderIds } }, 'Order');
       await prisma.order.deleteMany({ where: { id: { in: createdOrderIds } } });
     }
     if (createdRestaurantIds.length > 0) {
+      assertSafeCleanupFilter({ id: { in: createdRestaurantIds } }, 'Restaurant');
       await prisma.restaurant.deleteMany({ where: { id: { in: createdRestaurantIds } } });
     }
     if (createdCentralAccountIds.length > 0) {
+      assertSafeCleanupFilter({ id: { in: createdCentralAccountIds } }, 'CentralWhatsAppAccount');
       await prisma.centralWhatsAppAccount.deleteMany({ where: { id: { in: createdCentralAccountIds } } });
+    }
+    if (previouslyActiveAccount) {
+      await prisma.centralWhatsAppAccount.update({
+        where: { id: previouslyActiveAccount.id },
+        data: { is_active: true }
+      }).catch(() => {});
     }
 
     console.log(`\n============================================================`);

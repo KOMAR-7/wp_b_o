@@ -16,6 +16,7 @@ const {
   findTenantAddresses
 } = require('../src/services/tenant.service');
 const { recordIncomingEvent } = require('../src/services/webhook.service');
+const { assertSafeCleanupFilter } = require('../src/utils/test-guard');
 
 const TEST_PORT = 3998;
 let server;
@@ -120,15 +121,19 @@ async function runStage2Tests() {
     // -------------------------------------------------------------
     console.log('\n--- TEST GROUP 3: Multi-Tenant Isolation & Zero Cross-Tenant Leakage ---');
     // Clean up any test records from prior runs
+    assertSafeCleanupFilter({ restaurant_id: { in: [tenantA.id, tenantB.id] } }, 'OrderNotification');
     await prisma.orderNotification.deleteMany({
       where: { restaurant_id: { in: [tenantA.id, tenantB.id] } }
     });
+    assertSafeCleanupFilter({ restaurant_id: { in: [tenantA.id, tenantB.id] } }, 'Order');
     await prisma.order.deleteMany({
       where: { restaurant_id: { in: [tenantA.id, tenantB.id] } }
     });
+    assertSafeCleanupFilter({ restaurant_id: { in: [tenantA.id, tenantB.id] } }, 'SavedAddress');
     await prisma.savedAddress.deleteMany({
       where: { restaurant_id: { in: [tenantA.id, tenantB.id] } }
     });
+    assertSafeCleanupFilter({ restaurant_id: { in: [tenantA.id, tenantB.id] } }, 'ConversationSession');
     await prisma.conversationSession.deleteMany({
       where: { restaurant_id: { in: [tenantA.id, tenantB.id] } }
     });

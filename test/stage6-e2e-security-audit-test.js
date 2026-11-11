@@ -193,38 +193,78 @@ function buildMetaWebhookPayload({
   };
 }
 
-async function cleanupTestData() {
-  const testTenantIds = [TENANT_A_ID, TENANT_B_ID];
+const createdOrderIds = [];
+const createdNotificationIds = [];
+const createdOutboxIds = [];
+const createdSessionIds = [];
+const createdAddressIds = [];
+const createdWebhookEventKeys = [];
 
+async function cleanupTestData() {
   // 1. OrderNotification (child of Order)
-  const notifFilter = { restaurant_id: { in: testTenantIds } };
-  assertSafeCleanupFilter(notifFilter, 'OrderNotification');
-  await prisma.orderNotification.deleteMany({ where: notifFilter }).catch(() => {});
+  if (createdOrderIds.length > 0) {
+    const notifFilter = { order_id: { in: createdOrderIds } };
+    assertSafeCleanupFilter(notifFilter, 'OrderNotification');
+    await prisma.orderNotification.deleteMany({ where: notifFilter }).catch(() => {});
+  }
+  if (createdNotificationIds.length > 0) {
+    const notifFilter = { id: { in: createdNotificationIds } };
+    assertSafeCleanupFilter(notifFilter, 'OrderNotification');
+    await prisma.orderNotification.deleteMany({ where: notifFilter }).catch(() => {});
+  }
 
   // 2. OutboxMessage
-  const outboxFilter = { restaurant_id: { in: testTenantIds } };
-  assertSafeCleanupFilter(outboxFilter, 'OutboxMessage');
-  await prisma.outboxMessage.deleteMany({ where: outboxFilter }).catch(() => {});
+  if (createdOrderIds.length > 0) {
+    const outboxByOrderFilter = { order_id: { in: createdOrderIds } };
+    assertSafeCleanupFilter(outboxByOrderFilter, 'OutboxMessage');
+    await prisma.outboxMessage.deleteMany({ where: outboxByOrderFilter }).catch(() => {});
+  }
+  if (createdOutboxIds.length > 0) {
+    const outboxFilter = { id: { in: createdOutboxIds } };
+    assertSafeCleanupFilter(outboxFilter, 'OutboxMessage');
+    await prisma.outboxMessage.deleteMany({ where: outboxFilter }).catch(() => {});
+  }
 
   // 3. Order (parent)
-  const orderFilter = { restaurant_id: { in: testTenantIds } };
-  assertSafeCleanupFilter(orderFilter, 'Order');
-  await prisma.order.deleteMany({ where: orderFilter }).catch(() => {});
+  if (createdOrderIds.length > 0) {
+    const orderFilter = { id: { in: createdOrderIds } };
+    assertSafeCleanupFilter(orderFilter, 'Order');
+    await prisma.order.deleteMany({ where: orderFilter }).catch(() => {});
+  }
 
   // 4. ConversationSession
-  const sessionFilter = { restaurant_id: { in: testTenantIds } };
-  assertSafeCleanupFilter(sessionFilter, 'ConversationSession');
-  await prisma.conversationSession.deleteMany({ where: sessionFilter }).catch(() => {});
+  if (createdSessionIds.length > 0) {
+    const sessionFilter = { id: { in: createdSessionIds } };
+    assertSafeCleanupFilter(sessionFilter, 'ConversationSession');
+    await prisma.conversationSession.deleteMany({ where: sessionFilter }).catch(() => {});
+  }
+  const testCustomerPhones = [
+    '919611000001', '919622000002', '919633000003',
+    '919811000001', '919822999902', '919833999903'
+  ];
+  const testPhonesFilter = { customer_phone: { in: testCustomerPhones } };
+  assertSafeCleanupFilter(testPhonesFilter, 'ConversationSession');
+  await prisma.conversationSession.deleteMany({ where: testPhonesFilter }).catch(() => {});
 
   // 5. SavedAddress
-  const addressFilter = { restaurant_id: { in: testTenantIds } };
-  assertSafeCleanupFilter(addressFilter, 'SavedAddress');
-  await prisma.savedAddress.deleteMany({ where: addressFilter }).catch(() => {});
+  if (createdAddressIds.length > 0) {
+    const addressFilter = { id: { in: createdAddressIds } };
+    assertSafeCleanupFilter(addressFilter, 'SavedAddress');
+    await prisma.savedAddress.deleteMany({ where: addressFilter }).catch(() => {});
+  }
+  const addressPhoneFilter = { customer_phone: { in: testCustomerPhones } };
+  assertSafeCleanupFilter(addressPhoneFilter, 'SavedAddress');
+  await prisma.savedAddress.deleteMany({ where: addressPhoneFilter }).catch(() => {});
 
   // 6. WebhookEvent
-  const eventFilter = { event_key: { startsWith: 'wamid.AUDIT_' } };
-  assertSafeCleanupFilter(eventFilter, 'WebhookEvent');
-  await prisma.webhookEvent.deleteMany({ where: eventFilter }).catch(() => {});
+  if (createdWebhookEventKeys.length > 0) {
+    const eventFilter = { event_key: { in: createdWebhookEventKeys } };
+    assertSafeCleanupFilter(eventFilter, 'WebhookEvent');
+    await prisma.webhookEvent.deleteMany({ where: eventFilter }).catch(() => {});
+  }
+  const prefixEventFilter = { event_key: { startsWith: 'wamid.AUDIT_' } };
+  assertSafeCleanupFilter(prefixEventFilter, 'WebhookEvent');
+  await prisma.webhookEvent.deleteMany({ where: prefixEventFilter }).catch(() => {});
 }
 
 // =========================================================================
@@ -264,7 +304,7 @@ async function runAuditSuite() {
     const tokenB = `conf_${crypto.randomUUID()}`;
 
     // Seed active sessions in AWAITING_CONFIRMATION
-    await prisma.conversationSession.create({
+    const sessA = await prisma.conversationSession.create({
       data: {
         restaurant_id: TENANT_A_ID,
         customer_phone: customerPhoneA,
@@ -281,8 +321,9 @@ async function runAuditSuite() {
         }
       }
     });
+    createdSessionIds.push(sessA.id);
 
-    await prisma.conversationSession.create({
+    const sessB = await prisma.conversationSession.create({
       data: {
         restaurant_id: TENANT_B_ID,
         customer_phone: customerPhoneB,
@@ -299,6 +340,7 @@ async function runAuditSuite() {
         }
       }
     });
+    createdSessionIds.push(sessB.id);
 
     // Execute concurrent confirmations
     const [resOrderA, resOrderB] = await Promise.all([
@@ -313,6 +355,9 @@ async function runAuditSuite() {
         confirmationToken: tokenB
       })
     ]);
+
+    if (resOrderA.order) createdOrderIds.push(resOrderA.order.id);
+    if (resOrderB.order) createdOrderIds.push(resOrderB.order.id);
 
     assert(resOrderA.success === true, 'ST6-02: Tenant A order confirmation succeeded');
     assert(resOrderB.success === true, 'ST6-02: Tenant B order confirmation succeeded');
@@ -333,6 +378,8 @@ async function runAuditSuite() {
 
     const sessionResA = await processIncomingCart(TENANT_A_ID, dualCustomer, cartPayloadA);
     const sessionResB = await processIncomingCart(TENANT_B_ID, dualCustomer, cartPayloadB);
+    if (sessionResA.session) createdSessionIds.push(sessionResA.session.id);
+    if (sessionResB.session) createdSessionIds.push(sessionResB.session.id);
 
     assert(sessionResA.success === true, 'ST6-03: Cart accepted at Tenant A');
     assert(sessionResB.success === true, 'ST6-03: Cart accepted at Tenant B');
@@ -343,7 +390,7 @@ async function runAuditSuite() {
     assert(sessionResB.session.state.cart.subtotal === 400, 'ST6-03: Session B cart subtotal preserved (400)');
 
     // ST6-04: Saved Address Isolation Across Tenants
-    await prisma.savedAddress.create({
+    const savedAddr = await prisma.savedAddress.create({
       data: {
         restaurant_id: TENANT_A_ID,
         customer_phone: dualCustomer,
@@ -351,6 +398,7 @@ async function runAuditSuite() {
         label: 'Home'
       }
     });
+    createdAddressIds.push(savedAddr.id);
 
     const addressesAtA = await findCustomerSavedAddresses(TENANT_A_ID, dualCustomer);
     const addressesAtB = await findCustomerSavedAddresses(TENANT_B_ID, dualCustomer);
@@ -609,11 +657,11 @@ async function runAuditSuite() {
     });
     await sendSignedWebhook(step4ConsentPayload);
 
-    const savedAddr = await prisma.savedAddress.findFirst({
+    const step5SavedAddr = await prisma.savedAddress.findFirst({
       where: { restaurant_id: TENANT_A_ID, customer_phone: e2eCustomer }
     });
-    assert(savedAddr !== null, 'Step 5: Address durably saved to saved_addresses');
-    assert(savedAddr.address.includes('Koramangala') || savedAddr.address.includes('12.9352'), 'Step 5: Saved address contains location details');
+    assert(step5SavedAddr !== null, 'Step 5: Address durably saved to saved_addresses');
+    assert(step5SavedAddr.address.includes('Koramangala') || step5SavedAddr.address.includes('12.9352'), 'Step 5: Saved address contains location details');
 
     // Step 6: Choose Delivery
     const step6Session = await prisma.conversationSession.findUnique({
@@ -890,6 +938,7 @@ async function runAuditSuite() {
     assert(claimedWorkerA[0].id !== claimedWorkerB[0].id, 'Reliability: Workers claimed completely distinct messages (Zero double-claiming)');
 
     // Clean up specific test concurrent messages
+    assertSafeCleanupFilter({ id: { in: [concMsgA.id, concMsgB.id] } }, 'OutboxMessage');
     await prisma.outboxMessage.deleteMany({ where: { id: { in: [concMsgA.id, concMsgB.id] } } });
 
     // 5. Worker Crash & Lease Expiration Recovery
@@ -931,6 +980,7 @@ async function runAuditSuite() {
     assert(staleUpdate.reason === 'FENCED_OUT', 'Reliability: Reason is FENCED_OUT');
 
     // Clean up specific expired lease test message
+    assertSafeCleanupFilter({ id: expiredLeaseMsg.id }, 'OutboxMessage');
     await prisma.outboxMessage.deleteMany({ where: { id: expiredLeaseMsg.id } });
 
     // 7. Meta API Timeout & UNCERTAIN_DISPATCH
@@ -960,6 +1010,7 @@ async function runAuditSuite() {
     assert(timeoutResult.status === 'UNCERTAIN_DISPATCH', 'Reliability: Timeout marked as UNCERTAIN_DISPATCH (Zero blind retries)');
 
     // Clean up specific timeout test message
+    assertSafeCleanupFilter({ id: timeoutMsg.id }, 'OutboxMessage');
     await prisma.outboxMessage.deleteMany({ where: { id: timeoutMsg.id } });
 
     // 8. Meta Non-Retryable 4xx Error
@@ -989,6 +1040,7 @@ async function runAuditSuite() {
     assert(failResult.status === 'FAILED', 'Reliability: Non-retryable error transitioned status to FAILED');
 
     // Clean up specific fail test message
+    assertSafeCleanupFilter({ id: failMsg.id }, 'OutboxMessage');
     await prisma.outboxMessage.deleteMany({ where: { id: failMsg.id } });
 
 

@@ -49,6 +49,7 @@ const {
   normalizeAddress
 } = require('../src/services/address.service');
 const { encryptToken } = require('../src/utils/crypto');
+const { assertSafeCleanupFilter } = require('../src/utils/test-guard');
 
 async function runR6TestSuite() {
   console.log('============================================================');
@@ -749,15 +750,23 @@ async function runR6TestSuite() {
     try {
       clearDynamicCatalogs();
       for (const phone of testCustomerPhones) {
+        assertSafeCleanupFilter({ customer_phone: phone }, 'ConversationSession');
         await prisma.conversationSession.deleteMany({ where: { customer_phone: phone } }).catch(() => {});
+        assertSafeCleanupFilter({ customer_phone: phone }, 'SavedAddress');
         await prisma.savedAddress.deleteMany({ where: { customer_phone: phone } }).catch(() => {});
+        assertSafeCleanupFilter({ customer_phone: phone }, 'Order');
         await prisma.order.deleteMany({ where: { customer_phone: phone } }).catch(() => {});
       }
       for (const tId of testRestaurantIds) {
+        assertSafeCleanupFilter({ restaurant_id: tId }, 'OutboxMessage');
         await prisma.outboxMessage.deleteMany({ where: { restaurant_id: tId } }).catch(() => {});
+        assertSafeCleanupFilter({ restaurant_id: tId }, 'Order');
         await prisma.order.deleteMany({ where: { restaurant_id: tId } }).catch(() => {});
+        assertSafeCleanupFilter({ restaurant_id: tId }, 'ConversationSession');
         await prisma.conversationSession.deleteMany({ where: { restaurant_id: tId } }).catch(() => {});
+        assertSafeCleanupFilter({ restaurant_id: tId }, 'SavedAddress');
         await prisma.savedAddress.deleteMany({ where: { restaurant_id: tId } }).catch(() => {});
+        assertSafeCleanupFilter({ id: tId }, 'Restaurant');
         await prisma.restaurant.delete({ where: { id: tId } }).catch(() => {});
       }
     } catch (_) {}

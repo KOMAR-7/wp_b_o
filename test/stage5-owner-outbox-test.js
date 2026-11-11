@@ -17,9 +17,15 @@
  * - No DB transaction held during HTTP dispatch
  * - Token and secret redaction
  */
-require('./load-test-env');
 const crypto = require('crypto');
 const prisma = require('../src/config/database');
+const { assertSafeCleanupFilter } = require('../src/utils/test-guard');
+
+async function safeDeleteMany(delegate, where, entity) {
+  assertSafeCleanupFilter(where, entity);
+  return delegate.deleteMany({ where });
+}
+
 const config = require('../src/config/env');
 const {
   processIncomingCart,
@@ -40,7 +46,6 @@ const {
   dispatchPendingOutboxMessages,
   DEFAULT_MAX_ATTEMPTS
 } = require('../src/services/outbox.service');
-const { assertSafeCleanupFilter } = require('../src/utils/test-guard');
 
 async function runStage5OutboxTests() {
   console.log('\n============================================================');
@@ -68,7 +73,8 @@ async function runStage5OutboxTests() {
   const createdSavedAddressIds = [];
 
   try {
-    // Resolve seeded test restaurants (no destructive whole-table wipes)
+    // Existing records are preserved; this suite cleans up only tracked test artifacts.
+
     const tenantA = await prisma.restaurant.findUnique({
       where: { phone_number_id: '111111111111111' }
     });
@@ -358,10 +364,9 @@ async function runStage5OutboxTests() {
       createdOutboxIds.push(fenceMsg.id);
 
       // New worker claims the expired message
-      const claimedFresh = await prisma.$transaction(tx =>
-        claimPendingOutboxMessages(tx, { limit: 10, workerId: 'worker_fresh' })
+      const [freshClaim] = await prisma.$transaction(tx =>
+        claimPendingOutboxMessages(tx, { limit: 1, workerId: 'worker_fresh' })
       );
-      const freshClaim = claimedFresh.find(m => m.id === fenceMsg.id);
 
       assert(freshClaim !== undefined, 'Fresh worker claimed message after lease expired');
       assert(freshClaim.id === fenceMsg.id, 'Fresh worker claimed the expired message');
@@ -418,7 +423,7 @@ async function runStage5OutboxTests() {
       };
 
       const dispatchResult = await dispatchPendingOutboxMessages({
-        batchSize: 10,
+        batchSize: 1,
         customSender: mockSuccessSender
       });
 
@@ -456,7 +461,7 @@ async function runStage5OutboxTests() {
       };
 
       const failDispatchResult = await dispatchPendingOutboxMessages({
-        batchSize: 10,
+        batchSize: 1,
         customSender: mockFailSender
       });
 
@@ -493,7 +498,7 @@ async function runStage5OutboxTests() {
       };
 
       const timeoutDispatchResult = await dispatchPendingOutboxMessages({
-        batchSize: 10,
+        batchSize: 1,
         customSender: mockTimeoutSender
       });
 
@@ -531,7 +536,7 @@ async function runStage5OutboxTests() {
 
       // 1st retry attempt (attempts becomes 1 < 5) -> remains PENDING
       await dispatchPendingOutboxMessages({
-        batchSize: 10,
+        batchSize: 1,
         maxAttempts: 3,
         customSender: mock503Sender
       });
@@ -551,7 +556,7 @@ async function runStage5OutboxTests() {
 
       // 3rd attempt -> reaches maxAttempts (3) -> transitions to FAILED
       await dispatchPendingOutboxMessages({
-        batchSize: 10,
+        batchSize: 1,
         maxAttempts: 3,
         customSender: mock503Sender
       });
@@ -580,29 +585,39 @@ async function runStage5OutboxTests() {
     console.log('\n--- Cleaning up Stage 5.1 test artifacts ---');
     try {
       if (createdNotificationIds.length > 0) {
-        const notifFilter = { id: { in: createdNotificationIds } };
-        assertSafeCleanupFilter(notifFilter, 'OrderNotification');
-        await prisma.orderNotification.deleteMany({ where: notifFilter }).catch(() => {});
+        await safeDeleteMany(
+          prisma.orderNotification,
+          { id: { in: createdNotificationIds } },
+          'OrderNotification'
+        );
       }
       if (createdOutboxIds.length > 0) {
-        const outboxFilter = { id: { in: createdOutboxIds } };
-        assertSafeCleanupFilter(outboxFilter, 'OutboxMessage');
-        await prisma.outboxMessage.deleteMany({ where: outboxFilter }).catch(() => {});
+        await safeDeleteMany(
+          prisma.outboxMessage,
+          { id: { in: createdOutboxIds } },
+          'OutboxMessage'
+        );
       }
       if (createdOrderIds.length > 0) {
-        const orderFilter = { id: { in: createdOrderIds } };
-        assertSafeCleanupFilter(orderFilter, 'Order');
-        await prisma.order.deleteMany({ where: orderFilter }).catch(() => {});
+        await safeDeleteMany(
+          prisma.order,
+          { id: { in: createdOrderIds } },
+          'Order'
+        );
       }
       if (createdSessionIds.length > 0) {
-        const sessionFilter = { id: { in: createdSessionIds } };
-        assertSafeCleanupFilter(sessionFilter, 'ConversationSession');
-        await prisma.conversationSession.deleteMany({ where: sessionFilter }).catch(() => {});
+        await safeDeleteMany(
+          prisma.conversationSession,
+          { id: { in: createdSessionIds } },
+          'ConversationSession'
+        );
       }
       if (createdSavedAddressIds.length > 0) {
-        const addressFilter = { id: { in: createdSavedAddressIds } };
-        assertSafeCleanupFilter(addressFilter, 'SavedAddress');
-        await prisma.savedAddress.deleteMany({ where: addressFilter }).catch(() => {});
+        await safeDeleteMany(
+          prisma.savedAddress,
+          { id: { in: createdSavedAddressIds } },
+          'SavedAddress'
+        );
       }
     } catch (cleanupErr) {
       console.warn('Cleanup warning:', cleanupErr.message);

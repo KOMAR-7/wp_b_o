@@ -37,7 +37,9 @@ function validateConfig(testConfig = config) {
   if (!testConfig.meta.verifyToken) missing.push('META_VERIFY_TOKEN');
   if (!testConfig.meta.appSecret) missing.push('META_APP_SECRET');
   if (!testConfig.encryptionKey) missing.push('ENCRYPTION_KEY');
-  if (!testConfig.ownerCallbackSecret) missing.push('OWNER_CALLBACK_SECRET');
+  if (!testConfig.ownerCallbackSecret || !testConfig.ownerCallbackSecret.trim()) {
+    missing.push('OWNER_CALLBACK_SECRET');
+  }
 
   // Validate port
   if (!testConfig.port || isNaN(testConfig.port) || testConfig.port < 1 || testConfig.port > 65535) {

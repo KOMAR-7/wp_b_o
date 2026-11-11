@@ -21,6 +21,7 @@ const app = require('../src/app');
 const { generateSignedOwnerCallback } = require('../src/utils/callback-signer');
 const { isCentralSenderPhone, isRestaurantPhoneNumber } = require('../src/services/central-whatsapp.service');
 const { confirmCustomerOrder, processOwnerOrderDecision } = require('../src/services/order.service');
+const { assertSafeCleanupFilter } = require('../src/utils/test-guard');
 
 const TEST_PORT = 4994;
 const BASE_URL = `http://127.0.0.1:${TEST_PORT}`;
@@ -249,6 +250,7 @@ async function runSuite() {
     console.log('\n--- TEST C: Genuine customer messages Restaurant ---');
 
     // Cleanup any prior session for test customer
+    assertSafeCleanupFilter({ customer_phone: GENUINE_CUSTOMER_PHONE }, 'ConversationSession');
     await prisma.conversationSession.deleteMany({
       where: { customer_phone: GENUINE_CUSTOMER_PHONE }
     });
@@ -587,19 +589,23 @@ async function runSuite() {
     // Cleanup created test records
     try {
       if (testRecords.orders.length > 0) {
+        assertSafeCleanupFilter({ order_id: { in: testRecords.orders } }, 'OrderNotification');
         await prisma.orderNotification.deleteMany({
           where: { order_id: { in: testRecords.orders } }
         });
+        assertSafeCleanupFilter({ id: { in: testRecords.orders } }, 'Order');
         await prisma.order.deleteMany({
           where: { id: { in: testRecords.orders } }
         });
       }
       if (testRecords.outbox.length > 0) {
+        assertSafeCleanupFilter({ id: { in: testRecords.outbox } }, 'OutboxMessage');
         await prisma.outboxMessage.deleteMany({
           where: { id: { in: testRecords.outbox } }
         });
       }
       if (testRecords.sessions.length > 0) {
+        assertSafeCleanupFilter({ id: { in: testRecords.sessions } }, 'ConversationSession');
         await prisma.conversationSession.deleteMany({
           where: { id: { in: testRecords.sessions } }
         });

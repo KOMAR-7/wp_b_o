@@ -17,8 +17,14 @@ const SIG_LENGTH_HEX = 32; // 16 bytes (128 bits) hex representation
  * @returns {Buffer} 32-byte secret key
  */
 function getSigningSecret() {
-  const rawSecret = (process.env.OWNER_CALLBACK_SECRET && process.env.OWNER_CALLBACK_SECRET.trim())
-    || 'restopro_owner_callback_hmac_signing_key_2026';
+  const rawSecret = (process.env.OWNER_CALLBACK_SECRET || '').trim();
+
+  if (!rawSecret) {
+    throw new Error(
+      '[SIGNER CONFIG ERROR] OWNER_CALLBACK_SECRET environment variable is required.'
+    );
+  }
+
   return crypto.createHash('sha256').update(rawSecret).digest();
 }
 

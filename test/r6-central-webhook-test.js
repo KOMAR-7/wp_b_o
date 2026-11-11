@@ -10,6 +10,7 @@ const prisma = require('../src/config/database');
 const app = require('../src/app');
 const config = require('../src/config/env');
 const { generateSignedOwnerCallback } = require('../src/utils/callback-signer');
+const { assertSafeCleanupFilter } = require('../src/utils/test-guard');
 const { createCentralAccount, setCentralSenderForTesting } = require('../src/services/central-whatsapp.service');
 const { isCentralPhoneNumberId, resolveTenantByPhoneNumberId } = require('../src/services/tenant.service');
 const { handleIncomingEvent } = require('../src/controllers/webhook.controller');
@@ -81,6 +82,8 @@ async function runTests() {
   const ownerAPhone = '919876543211';
   const ownerBPhone = '919876543222';
   const unknownSenderPhone = '919999999999';
+  const createdWebhookEventKeys = [];
+  let previouslyActiveAccount = null;
 
   try {
     // Start local HTTP server
@@ -91,13 +94,17 @@ async function runTests() {
     });
 
     // Clean up any stale central accounts with test centralPhoneId
+    assertSafeCleanupFilter({ phone_number_id: { in: [centralPhoneId, '999888001112'] } }, 'CentralWhatsAppAccount');
     await prisma.centralWhatsAppAccount.deleteMany({
       where: { phone_number_id: { in: [centralPhoneId, '999888001112'] } }
     });
-    await prisma.centralWhatsAppAccount.updateMany({
-      where: { is_active: true },
-      data: { is_active: false }
-    });
+    previouslyActiveAccount = await prisma.centralWhatsAppAccount.findFirst({ where: { is_active: true } });
+    if (previouslyActiveAccount) {
+      await prisma.centralWhatsAppAccount.update({
+        where: { id: previouslyActiveAccount.id },
+        data: { is_active: false }
+      });
+    }
 
     // 1. Seed Active Central Account (XYZ)
     const centralAccount = await createCentralAccount({
@@ -199,6 +206,7 @@ async function runTests() {
     console.log('\n--- TEST GROUP 2: TC-04 — Restaurant A Owner Accepts Through Central XYZ ---');
     const acceptPayloadA = generateSignedOwnerCallback({ orderId: orderA.id, action: 'ACCEPT' });
     const webhookAId = `wamid_tc04_${Date.now()}`;
+    createdWebhookEventKeys.push(webhookAId);
     const webhookBodyA = JSON.stringify({
       object: 'whatsapp_business_account',
       entry: [{
@@ -263,6 +271,7 @@ async function runTests() {
     console.log('\n--- TEST GROUP 3: TC-05 — Restaurant B Owner Rejects Through Central XYZ ---');
     const rejectPayloadB = generateSignedOwnerCallback({ orderId: orderB.id, action: 'REJECT' });
     const webhookBId = `wamid_tc05_${Date.now()}`;
+    createdWebhookEventKeys.push(webhookBId);
     const webhookBodyB = JSON.stringify({
       object: 'whatsapp_business_account',
       entry: [{
@@ -357,6 +366,7 @@ async function runTests() {
     const tamperedCallbackC = validCallbackC.slice(0, -6) + 'abcdef';
 
     const webhookTamperedId = `wamid_tc11_tampered_${Date.now()}`;
+    createdWebhookEventKeys.push(webhookTamperedId);
     const webhookBodyTampered = JSON.stringify({
       object: 'whatsapp_business_account',
       entry: [{
@@ -396,6 +406,7 @@ async function runTests() {
     // Expired signature
     const expiredCallbackC = generateSignedOwnerCallback({ orderId: orderC.id, action: 'ACCEPT', ttlSeconds: -100 });
     const webhookExpiredId = `wamid_tc11_expired_${Date.now()}`;
+    createdWebhookEventKeys.push(webhookExpiredId);
     const webhookBodyExpired = JSON.stringify({
       object: 'whatsapp_business_account',
       entry: [{
@@ -433,6 +444,7 @@ async function runTests() {
     console.log('\n--- TEST GROUP 6: TC-12 — Unknown Sender Authorization Rejection ---');
     // Unknown phone sends valid callback for Order C
     const webhookUnknownId = `wamid_tc12_unknown_${Date.now()}`;
+    createdWebhookEventKeys.push(webhookUnknownId);
     const webhookBodyUnknown = JSON.stringify({
       object: 'whatsapp_business_account',
       entry: [{
@@ -477,6 +489,7 @@ async function runTests() {
 
     // Send unknown free-form text message to Central Number XYZ
     const webhookTextCentralId = `wamid_tc13_text_central_${Date.now()}`;
+    createdWebhookEventKeys.push(webhookTextCentralId);
     const webhookBodyTextCentral = JSON.stringify({
       object: 'whatsapp_business_account',
       entry: [{
@@ -520,6 +533,7 @@ async function runTests() {
 
     console.log('\n--- TEST GROUP 8: TC-16 — Central Status Receipt Delivery Failure Tracking ---');
     const failedStatusId = `wamid_tc16_status_${Date.now()}`;
+    createdWebhookEventKeys.push(`status:${failedStatusId}:failed`);
     const webhookStatusBody = JSON.stringify({
       object: 'whatsapp_business_account',
       entry: [{
@@ -574,25 +588,33 @@ async function runTests() {
 
     console.log('\n--- Cleaning up R6.6 Webhook test artifacts ---');
     if (createdOutboxIds.length > 0) {
+      assertSafeCleanupFilter({ id: { in: createdOutboxIds } }, 'OutboxMessage');
       await prisma.outboxMessage.deleteMany({ where: { id: { in: createdOutboxIds } } });
     }
-    await prisma.orderNotification.deleteMany({ where: { order_id: { in: createdOrderIds } } });
     if (createdOrderIds.length > 0) {
+      assertSafeCleanupFilter({ order_id: { in: createdOrderIds } }, 'OrderNotification');
+      await prisma.orderNotification.deleteMany({ where: { order_id: { in: createdOrderIds } } });
+      assertSafeCleanupFilter({ id: { in: createdOrderIds } }, 'Order');
       await prisma.order.deleteMany({ where: { id: { in: createdOrderIds } } });
     }
     if (createdRestaurantIds.length > 0) {
+      assertSafeCleanupFilter({ id: { in: createdRestaurantIds } }, 'Restaurant');
       await prisma.restaurant.deleteMany({ where: { id: { in: createdRestaurantIds } } });
     }
     if (createdCentralAccountIds.length > 0) {
+      assertSafeCleanupFilter({ id: { in: createdCentralAccountIds } }, 'CentralWhatsAppAccount');
       await prisma.centralWhatsAppAccount.deleteMany({ where: { id: { in: createdCentralAccountIds } } });
     }
-    await prisma.webhookEvent.deleteMany({
-      where: {
-        event_key: {
-          contains: 'tc'
-        }
-      }
-    });
+    if (createdWebhookEventKeys.length > 0) {
+      assertSafeCleanupFilter({ event_key: { in: createdWebhookEventKeys } }, 'WebhookEvent');
+      await prisma.webhookEvent.deleteMany({ where: { event_key: { in: createdWebhookEventKeys } } });
+    }
+    if (previouslyActiveAccount) {
+      await prisma.centralWhatsAppAccount.update({
+        where: { id: previouslyActiveAccount.id },
+        data: { is_active: true }
+      }).catch(() => {});
+    }
 
     console.log(`\n============================================================`);
     console.log(`   R6.6 CENTRAL WEBHOOK RESULTS: ${passed} PASSED, ${failed} FAILED`);

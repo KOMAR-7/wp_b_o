@@ -5,6 +5,7 @@
 require('./load-test-env');
 const crypto = require('crypto');
 const prisma = require('../src/config/database');
+const { assertSafeCleanupFilter } = require('../src/utils/test-guard');
 
 async function runStage4MigrationTests() {
   console.log('\n============================================================');
@@ -314,16 +315,19 @@ async function runStage4MigrationTests() {
   } finally {
     // Clean up test rows
     if (createdOutboxIds.length > 0) {
+      assertSafeCleanupFilter({ id: { in: createdOutboxIds } }, 'OutboxMessage');
       await prisma.outboxMessage.deleteMany({
         where: { id: { in: createdOutboxIds } }
       });
     }
     if (createdWebhookEventIds.length > 0) {
+      assertSafeCleanupFilter({ id: { in: createdWebhookEventIds } }, 'WebhookEvent');
       await prisma.webhookEvent.deleteMany({
         where: { id: { in: createdWebhookEventIds } }
       });
     }
     if (createdOrderIds.length > 0) {
+      assertSafeCleanupFilter({ id: { in: createdOrderIds } }, 'Order');
       await prisma.order.deleteMany({
         where: { id: { in: createdOrderIds } }
       });
