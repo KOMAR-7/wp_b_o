@@ -21,15 +21,8 @@ const logger = require('../utils/logger');
 const config = require('../config/env');
 
 // Built-in registry of known restaurant catalogue items
-// Pre-configured for known production and test tenant SKUs
-const BUILT_IN_CATALOG_REGISTRY = {
-  // RestPro Production Catalogue (WABA 1620323530136933, Phone 1427497060448125)
-  'sezp6n6uee': {
-    name: 'Chicken Dum Biryani (Special)',
-    price: 800,
-    category: 'Main Course'
-  }
-};
+// Audited: No unverified or hardcoded production mappings permitted
+const BUILT_IN_CATALOG_REGISTRY = Object.freeze({});
 
 // Dynamic in-memory catalogue overrides (useful for testing or runtime updates)
 const dynamicTenantCatalogs = new Map();
@@ -49,7 +42,8 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours TTL
  */
 function getCachedProduct(restaurantId = 'global', productRetailerId = '') {
   if (!productRetailerId) return null;
-  const key = `${restaurantId || 'global'}:${productRetailerId.trim()}`;
+  const targetTenant = restaurantId || 'global';
+  const key = `${targetTenant}:${productRetailerId.trim()}`;
   const entry = tenantCatalogCache.get(key);
   if (!entry) return null;
 
@@ -57,7 +51,7 @@ function getCachedProduct(restaurantId = 'global', productRetailerId = '') {
     tenantCatalogCache.delete(key);
     return null;
   }
-  return { name: entry.name, price: entry.price, source: entry.source };
+  return { name: entry.name, price: entry.price, currency: entry.currency, source: entry.source };
 }
 
 /**
@@ -65,14 +59,16 @@ function getCachedProduct(restaurantId = 'global', productRetailerId = '') {
  *
  * @param {string} [restaurantId='global']
  * @param {string} productRetailerId
- * @param {{name: string, price?: number, source?: string}} data
+ * @param {{name: string, price?: number, currency?: string, source?: string}} data
  */
 function setCachedProduct(restaurantId = 'global', productRetailerId = '', data = {}) {
   if (!productRetailerId || !data.name) return;
-  const key = `${restaurantId || 'global'}:${productRetailerId.trim()}`;
+  const targetTenant = restaurantId || 'global';
+  const key = `${targetTenant}:${productRetailerId.trim()}`;
   tenantCatalogCache.set(key, {
     name: data.name.trim(),
     price: typeof data.price === 'number' ? data.price : undefined,
+    currency: typeof data.currency === 'string' ? data.currency.trim().toUpperCase() : undefined,
     source: data.source || 'CACHE',
     cachedAt: Date.now()
   });
@@ -105,6 +101,7 @@ function clearDynamicCatalogs() {
 
 /**
  * Resolves the genuine menu item name synchronously for a given product_retailer_id.
+ * Never returns a raw SKU, retailer ID, or synthetic fallback string as the product name.
  *
  * @param {Object} params
  * @param {string} [params.restaurantId] - Restaurant UUID
@@ -112,16 +109,14 @@ function clearDynamicCatalogs() {
  * @param {string} params.productRetailerId - Product SKU / retailer ID
  * @param {Object} [params.rawItem] - Raw item object from WhatsApp order payload
  * @param {string} [params.internalNotes] - Restaurant internal_notes string
- * @param {boolean} [params.fallbackIfUnresolved=false] - Whether to assign fallback name if unresolvable
- * @returns {{name: string|null, isResolved: boolean, source: string, productRetailerId: string}}
+ * @returns {{name: string|null, isResolved: boolean, source: string, productRetailerId: string, price?: number, currency?: string}}
  */
 function resolveMenuItemName({
   restaurantId = null,
   catalogId = null,
   productRetailerId,
   rawItem = null,
-  internalNotes = null,
-  fallbackIfUnresolved = false
+  internalNotes = null
 }) {
   const retailerId = typeof productRetailerId === 'string' ? productRetailerId.trim() : '';
 
@@ -139,8 +134,13 @@ function resolveMenuItemName({
     const candidateName = rawItem.name || rawItem.title || rawItem.product_name || rawItem.productName;
     if (typeof candidateName === 'string') {
       const trimmed = candidateName.trim();
-      // Ensure candidate name is non-empty and not just echoing the raw SKU / product ID
-      if (trimmed.length > 0 && trimmed.toLowerCase() !== retailerId.toLowerCase()) {
+      // Ensure candidate name is non-empty, not echoing raw SKU, and not generic placeholder
+      if (
+        trimmed.length > 0 &&
+        trimmed.toLowerCase() !== retailerId.toLowerCase() &&
+        !trimmed.toLowerCase().startsWith('item (') &&
+        trimmed.toLowerCase() !== 'item'
+      ) {
         return {
           name: trimmed,
           isResolved: true,
@@ -151,18 +151,20 @@ function resolveMenuItemName({
     }
   }
 
-  // 2. In-memory TTL Cache (tenant-scoped or global)
-  const cached = getCachedProduct(restaurantId, retailerId) || getCachedProduct('global', retailerId);
+  // 2. In-memory Tenant TTL Cache (strictly scoped by restaurantId)
+  const cached = getCachedProduct(restaurantId, retailerId);
   if (cached && cached.name) {
     return {
       name: cached.name,
+      price: cached.price,
+      currency: cached.currency,
       isResolved: true,
       source: cached.source || 'CACHE',
       productRetailerId: retailerId
     };
   }
 
-  // 3. Dynamic in-memory tenant overrides (if set)
+  // 3. Dynamic in-memory tenant overrides (strictly scoped by restaurantId)
   if (restaurantId && dynamicTenantCatalogs.has(restaurantId)) {
     const tenantMap = dynamicTenantCatalogs.get(restaurantId);
     if (tenantMap && tenantMap[retailerId]) {
@@ -171,24 +173,9 @@ function resolveMenuItemName({
       if (typeof name === 'string' && name.trim()) {
         return {
           name: name.trim(),
+          price: typeof entry === 'object' && typeof entry.price === 'number' ? entry.price : undefined,
           isResolved: true,
           source: 'DYNAMIC_TENANT_CATALOG',
-          productRetailerId: retailerId
-        };
-      }
-    }
-  }
-
-  if (dynamicTenantCatalogs.has('global')) {
-    const globalMap = dynamicTenantCatalogs.get('global');
-    if (globalMap && globalMap[retailerId]) {
-      const entry = globalMap[retailerId];
-      const name = typeof entry === 'string' ? entry : entry.name;
-      if (typeof name === 'string' && name.trim()) {
-        return {
-          name: name.trim(),
-          isResolved: true,
-          source: 'DYNAMIC_GLOBAL_CATALOG',
           productRetailerId: retailerId
         };
       }
@@ -204,9 +191,10 @@ function resolveMenuItemName({
         const entry = menuCatalog[retailerId];
         if (entry) {
           const name = typeof entry === 'string' ? entry : entry.name;
-          if (typeof name === 'string' && name.trim()) {
+          if (typeof name === 'string' && name.trim() && name.trim().toLowerCase() !== retailerId.toLowerCase()) {
             return {
               name: name.trim(),
+              price: typeof entry === 'object' && typeof entry.price === 'number' ? entry.price : undefined,
               isResolved: true,
               source: 'TENANT_METADATA',
               productRetailerId: retailerId
@@ -222,38 +210,23 @@ function resolveMenuItemName({
     }
   }
 
-  // 5. Built-in registry of known SKUs
+  // 5. Built-in registry of known SKUs (strictly audited, empty by default)
   if (BUILT_IN_CATALOG_REGISTRY[retailerId]) {
     const entry = BUILT_IN_CATALOG_REGISTRY[retailerId];
     return {
       name: entry.name,
+      price: entry.price,
       isResolved: true,
       source: 'BUILT_IN_REGISTRY',
       productRetailerId: retailerId
     };
   }
 
-  // 6. Missing / Unmatched Catalogue ID
-  if (fallbackIfUnresolved) {
-    const fallbackName = `Item (${retailerId})`;
-    logger.warn('Catalogue product retailer ID could not be resolved to a human-readable product name; using fallback', {
-      restaurantId,
-      catalogId,
-      productRetailerId: retailerId,
-      fallbackName
-    });
-    return {
-      name: fallbackName,
-      isResolved: false,
-      source: 'FALLBACK_UNRESOLVED',
-      productRetailerId: retailerId
-    };
-  }
-
+  // 6. Unresolved: Never return raw SKU or Item (SKU)
   return {
     name: null,
     isResolved: false,
-    source: 'UNMATCHED',
+    source: 'UNRESOLVED',
     productRetailerId: retailerId
   };
 }
@@ -267,39 +240,44 @@ function resolveMenuItemName({
  * @param {string} params.catalogId
  * @param {string} params.productRetailerId
  * @param {string} params.accessToken
- * @returns {Promise<{name: string, price?: number, source: string}|null>}
+ * @param {number} [params.timeoutMs=3000]
+ * @param {Object} [params.graphClient=axios]
+ * @returns {Promise<{name: string, price?: number, currency?: string, source: string}|null>}
  */
 async function fetchMetaCatalogProduct({
   restaurantId = null,
   catalogId,
   productRetailerId,
-  accessToken
+  accessToken,
+  timeoutMs = 3000,
+  graphClient = axios
 }) {
   if (!catalogId || !productRetailerId || !accessToken) return null;
-  if (accessToken.startsWith('mock_')) return null;
+  if (accessToken === 'mock_disabled') return null;
 
   const graphVersion = config.meta?.apiVersion || 'v21.0';
   const url = `https://graph.facebook.com/${graphVersion}/${encodeURIComponent(catalogId)}/products`;
 
   try {
-    const res = await axios.get(url, {
+    const res = await graphClient.get(url, {
       params: {
         filter: JSON.stringify({ retailer_id: { eq: productRetailerId } }),
         fields: 'id,retailer_id,name,price,currency'
       },
       headers: { Authorization: `Bearer ${accessToken}` },
-      timeout: 3000
+      timeout: timeoutMs
     });
 
     const items = res.data?.data;
     if (Array.isArray(items) && items.length > 0) {
-      const match = items[0];
+      const match = items.find(it => it && it.retailer_id === productRetailerId) || items[0];
       if (match && typeof match.name === 'string' && match.name.trim()) {
         const resolvedName = match.name.trim();
         if (resolvedName.toLowerCase() !== productRetailerId.toLowerCase()) {
           return {
             name: resolvedName,
             price: match.price ? parseFloat(match.price) : undefined,
+            currency: match.currency || undefined,
             source: 'META_CATALOG_API'
           };
         }
@@ -307,7 +285,7 @@ async function fetchMetaCatalogProduct({
     }
     return null;
   } catch (err) {
-    logger.debug('Meta Catalog API product query failed or unauthorized', {
+    logger.warn('Meta Catalog API product query failed or unauthorized', {
       restaurantId,
       catalogId,
       productRetailerId,
@@ -327,7 +305,9 @@ async function fetchMetaCatalogProduct({
  * @param {Object} [params.rawItem]
  * @param {string} [params.internalNotes]
  * @param {string} [params.accessToken]
- * @returns {Promise<{name: string, isResolved: boolean, source: string, productRetailerId: string}>}
+ * @param {number} [params.timeoutMs=3000]
+ * @param {Object} [params.graphClient=axios]
+ * @returns {Promise<{name: string|null, isResolved: boolean, source: string, productRetailerId: string, price?: number, currency?: string}>}
  */
 async function resolveMenuItemNameAsync({
   restaurantId = null,
@@ -335,22 +315,10 @@ async function resolveMenuItemNameAsync({
   productRetailerId,
   rawItem = null,
   internalNotes = null,
-  accessToken = null
+  accessToken = null,
+  timeoutMs = 3000,
+  graphClient = axios
 }) {
-  // 1. Try synchronous resolution first (payload, cache, dynamic tenant, metadata, built-in)
-  const syncResult = resolveMenuItemName({
-    restaurantId,
-    catalogId,
-    productRetailerId,
-    rawItem,
-    internalNotes,
-    fallbackIfUnresolved: false
-  });
-
-  if (syncResult && syncResult.isResolved) {
-    return syncResult;
-  }
-
   const retailerId = typeof productRetailerId === 'string' ? productRetailerId.trim() : '';
   if (!retailerId) {
     return {
@@ -361,25 +329,43 @@ async function resolveMenuItemNameAsync({
     };
   }
 
+  // 1. Try synchronous resolution first (payload, cache, dynamic tenant, metadata)
+  const syncResult = resolveMenuItemName({
+    restaurantId,
+    catalogId,
+    productRetailerId: retailerId,
+    rawItem,
+    internalNotes
+  });
+
+  if (syncResult && syncResult.isResolved && syncResult.name) {
+    return syncResult;
+  }
+
   // 2. If Meta API credentials and catalog ID are present, attempt live query
   if (catalogId && accessToken) {
     const apiResult = await fetchMetaCatalogProduct({
       restaurantId,
       catalogId,
       productRetailerId: retailerId,
-      accessToken
+      accessToken,
+      timeoutMs,
+      graphClient
     });
 
     if (apiResult && apiResult.name) {
-      // Cache for this tenant
+      // Cache strictly for this tenant
       setCachedProduct(restaurantId, retailerId, {
         name: apiResult.name,
         price: apiResult.price,
+        currency: apiResult.currency,
         source: 'META_CATALOG_API'
       });
 
       return {
         name: apiResult.name,
+        price: apiResult.price,
+        currency: apiResult.currency,
         isResolved: true,
         source: 'META_CATALOG_API',
         productRetailerId: retailerId
@@ -387,19 +373,17 @@ async function resolveMenuItemNameAsync({
     }
   }
 
-  // 3. Fallback when unresolvable: Never display raw SKU as if it were a valid product name
-  const fallbackName = `Item (${retailerId})`;
-  logger.warn('Catalogue product retailer ID could not be resolved to a human-readable product name; using fallback', {
+  // 3. Fallback when unresolvable: Never display raw SKU or Item (SKU)
+  logger.warn('Catalogue product retailer ID could not be resolved against any authoritative source', {
     restaurantId,
     catalogId,
-    productRetailerId: retailerId,
-    fallbackName
+    productRetailerId: retailerId
   });
 
   return {
-    name: fallbackName,
+    name: null,
     isResolved: false,
-    source: 'FALLBACK_UNRESOLVED',
+    source: 'UNRESOLVED',
     productRetailerId: retailerId
   };
 }

@@ -251,7 +251,13 @@ function parseAndValidateCart(rawOrder, options = {}) {
 
     if (!resolvedName) {
       const candidatePayloadName = item.name || item.title || item.product_name || item.productName;
-      if (typeof candidatePayloadName === 'string' && candidatePayloadName.trim() && candidatePayloadName.trim() !== retailerId) {
+      if (
+        typeof candidatePayloadName === 'string' &&
+        candidatePayloadName.trim() &&
+        candidatePayloadName.trim().toLowerCase() !== retailerId.toLowerCase() &&
+        !candidatePayloadName.trim().toLowerCase().startsWith('item (') &&
+        candidatePayloadName.trim().toLowerCase() !== 'item'
+      ) {
         resolvedName = candidatePayloadName.trim();
         isResolved = true;
       }
@@ -261,14 +267,13 @@ function parseAndValidateCart(rawOrder, options = {}) {
       return {
         isValid: false,
         code: 'UNRESOLVED_CATALOG_ITEM',
-        error: `Could not resolve menu item name for catalogue ID "${retailerId}". Unmatched catalogue items are rejected.`
+        error: `Could not resolve menu item name for catalogue ID "${retailerId}". Unmatched catalogue items are rejected.`,
+        unresolvedRetailerIds: [retailerId]
       };
     }
 
-    const fallbackName = `Item (${retailerId})`;
-    const displayName = resolvedName || (typeof item.name === 'string' && item.name.trim() && item.name.trim().toLowerCase() !== retailerId.toLowerCase()
-      ? item.name.trim()
-      : (options.restaurantId || options.useFriendlyFallback ? fallbackName : retailerId));
+    // Never generate "Item (SKU)" or leak raw SKU into productName when scoped to a restaurant
+    const displayName = resolvedName || (options.restaurantId ? null : retailerId);
 
     normalizedItems.push({
       productRetailerId: retailerId,
@@ -313,7 +318,7 @@ function parseAndValidateCart(rawOrder, options = {}) {
  */
 async function parseAndValidateCartAsync(rawOrder, options = {}) {
   // 1. Run structural & decimal validation
-  const syncValidation = parseAndValidateCart(rawOrder, options);
+  const syncValidation = parseAndValidateCart(rawOrder, { ...options, strictResolution: false });
   if (!syncValidation.isValid) {
     return syncValidation;
   }
@@ -326,7 +331,7 @@ async function parseAndValidateCartAsync(rawOrder, options = {}) {
     const item = syncValidation.cart.items[i];
     const rawItem = (syncValidation.cart.rawOrderSnapshot?.product_items || [])[i] || {};
 
-    if (item.isResolved) {
+    if (item.isResolved && item.productName) {
       normalizedItems.push(item);
       continue;
     }
@@ -342,7 +347,8 @@ async function parseAndValidateCartAsync(rawOrder, options = {}) {
         productRetailerId: retailerId,
         rawItem,
         internalNotes: options.internalNotes,
-        accessToken: options.accessToken
+        accessToken: options.accessToken,
+        graphClient: options.graphClient
       });
       if (res && res.name) {
         resolvedName = res.name;
@@ -355,7 +361,8 @@ async function parseAndValidateCartAsync(rawOrder, options = {}) {
         productRetailerId: retailerId,
         rawItem,
         internalNotes: options.internalNotes,
-        accessToken: options.accessToken
+        accessToken: options.accessToken,
+        graphClient: options.graphClient
       });
       if (res && res.name) {
         resolvedName = res.name;
@@ -363,16 +370,49 @@ async function parseAndValidateCartAsync(rawOrder, options = {}) {
       }
     }
 
-    const fallbackName = `Item (${retailerId})`;
-    const displayName = resolvedName || (typeof rawItem.name === 'string' && rawItem.name.trim() && rawItem.name.trim().toLowerCase() !== retailerId.toLowerCase()
-      ? rawItem.name.trim()
-      : fallbackName);
+    // Direct payload attribute fallback (item.name in rawItem)
+    if (!resolvedName) {
+      const candidatePayloadName = rawItem.name || rawItem.title || rawItem.product_name || rawItem.productName;
+      if (
+        typeof candidatePayloadName === 'string' &&
+        candidatePayloadName.trim() &&
+        candidatePayloadName.trim().toLowerCase() !== retailerId.toLowerCase() &&
+        !candidatePayloadName.trim().toLowerCase().startsWith('item (') &&
+        candidatePayloadName.trim().toLowerCase() !== 'item'
+      ) {
+        resolvedName = candidatePayloadName.trim();
+        isResolved = true;
+      }
+    }
+
+    // Never generate "Item (SKU)" or leak raw SKU into productName when scoped to a restaurant
+    const displayName = resolvedName || (options.restaurantId ? null : retailerId);
 
     normalizedItems.push({
       ...item,
       productName: displayName,
       isResolved
     });
+  }
+
+  // 3. Strict resolution check: Fail closed if any item cannot be resolved against the catalogue
+  const unresolvedItems = normalizedItems.filter(it => !it.isResolved || !it.productName);
+  const strictMode = options.strictResolution !== undefined
+    ? Boolean(options.strictResolution)
+    : Boolean(options.restaurantId);
+
+  if (strictMode && unresolvedItems.length > 0) {
+    const unresolvedIds = unresolvedItems.map(u => u.productRetailerId);
+    return {
+      isValid: false,
+      code: 'UNRESOLVED_CATALOG_ITEM',
+      error: `Could not resolve catalogue product names for item(s): ${unresolvedIds.join(', ')}. Unverified catalogue items cannot be confirmed.`,
+      unresolvedRetailerIds: unresolvedIds,
+      cart: {
+        ...syncValidation.cart,
+        items: normalizedItems
+      }
+    };
   }
 
   return {

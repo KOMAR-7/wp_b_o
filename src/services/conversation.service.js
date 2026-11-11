@@ -111,12 +111,19 @@ async function processIncomingCart(restaurantId, customerPhone, rawOrderPayload,
       restaurantId,
       customerPhone,
       code: validation.code,
-      error: validation.error
+      error: validation.error,
+      unresolvedRetailerIds: validation.unresolvedRetailerIds
     });
     return {
       success: false,
       code: validation.code,
-      error: validation.error
+      error: validation.error,
+      unresolvedRetailerIds: validation.unresolvedRetailerIds,
+      action: {
+        type: 'SEND_CATALOG_UNRESOLVED_ERROR',
+        nextStep: 'AWAITING_CART',
+        message: "We're sorry, but one or more items from your cart could not be verified with our menu catalogue. Please open our menu catalogue to re-select your items, or contact the restaurant directly."
+      }
     };
   }
 

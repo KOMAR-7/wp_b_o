@@ -118,15 +118,16 @@ function buildOrderSummary({
     const rawName = typeof item.productName === 'string' ? item.productName.trim() : '';
     const retailerId = typeof item.productRetailerId === 'string' ? item.productRetailerId.trim() : '';
     const isPureRetailerId = rawName && retailerId && rawName.toLowerCase() === retailerId.toLowerCase();
-    const displayName = (isPureRetailerId || !rawName)
-      ? (retailerId ? `Item (${retailerId})` : 'Item')
-      : rawName;
-    const isResolved = item.isResolved !== false && !isPureRetailerId && Boolean(rawName);
+    const isItemSku = rawName && (rawName.toLowerCase().startsWith('item (') || rawName.toLowerCase() === 'item');
+
+    if (!rawName || isPureRetailerId || isItemSku || item.isResolved === false) {
+      throw new Error(`[ORDER ERROR] Cannot create order summary: Item "${retailerId || 'unknown'}" is not resolved to an authoritative catalogue product name.`);
+    }
 
     return {
       productRetailerId: retailerId,
-      productName: displayName,
-      isResolved,
+      productName: rawName,
+      isResolved: true,
       quantity: qty,
       unitPrice: fromIntegerCents(priceCents),
       lineTotal: fromIntegerCents(lineTotalCents),

@@ -181,6 +181,11 @@ async function runRegressionTestSuite() {
         revoked: false
       },
       menuCatalog: {
+        'sezp6n6uee': {
+          name: 'Chicken Dum Biryani (Special)',
+          price: 800,
+          category: 'Main Course'
+        },
         'zfzb9a6ptg': {
           name: 'Mutton Seekh Kebab (4 Pcs)',
           price: 180,
@@ -206,32 +211,40 @@ async function runRegressionTestSuite() {
     });
     testRestaurantIds.push(tenant.id);
 
-    // Test 7: Built-in registry resolution (sezp6n6uee -> Chicken Dum Biryani (Special))
+    // Test 7: Audited built-in registry rejects unverified unknown SKUs
     {
       const res = resolveMenuItemName({
+        restaurantId: tenant.id,
+        productRetailerId: 'unverified_unknown_sku_123',
+        internalNotes: tenant.internal_notes
+      });
+
+      assert.strictEqual(res.isResolved, false, 'Unverified SKU must not resolve');
+      assert.strictEqual(res.name, null, 'Unverified SKU must have null product name');
+      assert.strictEqual(res.source, 'UNRESOLVED', 'Source is UNRESOLVED');
+      pass('REG-CAT-01: Audited built-in registry rejects unverified unknown SKUs (no hardcoded guesses)');
+    }
+
+    // Test 8: Tenant metadata menuCatalog resolution (sezp6n6uee & zfzb9a6ptg)
+    {
+      const res1 = resolveMenuItemName({
         restaurantId: tenant.id,
         productRetailerId: 'sezp6n6uee',
         internalNotes: tenant.internal_notes
       });
+      assert.strictEqual(res1.isResolved, true, 'Should resolve tenant menuCatalog SKU 1');
+      assert.strictEqual(res1.name, 'Chicken Dum Biryani (Special)', 'Resolved to genuine menu item name');
+      assert.strictEqual(res1.source, 'TENANT_METADATA', 'Source is TENANT_METADATA');
 
-      assert.strictEqual(res.isResolved, true, 'Should resolve built-in SKU');
-      assert.strictEqual(res.name, 'Chicken Dum Biryani (Special)', 'Resolved to Chicken Dum Biryani');
-      assert.strictEqual(res.source, 'BUILT_IN_REGISTRY', 'Source is BUILT_IN_REGISTRY');
-      pass('REG-CAT-01: Built-in registry resolves "sezp6n6uee" -> "Chicken Dum Biryani (Special)"');
-    }
-
-    // Test 8: Tenant metadata menuCatalog resolution (zfzb9a6ptg -> Mutton Seekh Kebab (4 Pcs))
-    {
-      const res = resolveMenuItemName({
+      const res2 = resolveMenuItemName({
         restaurantId: tenant.id,
         productRetailerId: 'zfzb9a6ptg',
         internalNotes: tenant.internal_notes
       });
-
-      assert.strictEqual(res.isResolved, true, 'Should resolve tenant menuCatalog SKU');
-      assert.strictEqual(res.name, 'Mutton Seekh Kebab (4 Pcs)', 'Resolved to genuine menu item name');
-      assert.strictEqual(res.source, 'TENANT_METADATA', 'Source is TENANT_METADATA');
-      pass('REG-CAT-02: Tenant metadata menuCatalog resolves "zfzb9a6ptg" -> "Mutton Seekh Kebab (4 Pcs)"');
+      assert.strictEqual(res2.isResolved, true, 'Should resolve tenant menuCatalog SKU 2');
+      assert.strictEqual(res2.name, 'Mutton Seekh Kebab (4 Pcs)', 'Resolved to genuine menu item name');
+      assert.strictEqual(res2.source, 'TENANT_METADATA', 'Source is TENANT_METADATA');
+      pass('REG-CAT-02: Tenant metadata menuCatalog accurately resolves both "sezp6n6uee" and "zfzb9a6ptg"');
     }
 
     // Test 9: Direct payload attributes resolution
@@ -270,19 +283,18 @@ async function runRegressionTestSuite() {
       pass('REG-CAT-04: In-Memory TTL Cache returns resolved product without external query');
     }
 
-    // Test 11: Unresolved SKU fallback — Never silently pretends retailer ID is product name
+    // Test 11: Unresolved SKU handling — Never returns synthetic "Item (SKU)" or raw retailer ID
     {
       const unmatchableSku = 'unresolved_sku_xyz999';
       const res = resolveMenuItemName({
         restaurantId: tenant.id,
-        productRetailerId: unmatchableSku,
-        fallbackIfUnresolved: true
+        productRetailerId: unmatchableSku
       });
 
       assert.strictEqual(res.isResolved, false, 'isResolved must be false');
-      assert.strictEqual(res.name, `Item (${unmatchableSku})`, 'Clear fallback name provided');
-      assert.strictEqual(res.source, 'FALLBACK_UNRESOLVED', 'Source marked as FALLBACK_UNRESOLVED');
-      pass('REG-CAT-05: Unresolved retailer ID returns Item (retailer_id) fallback with isResolved: false');
+      assert.strictEqual(res.name, null, 'Never output Item (SKU) as productName');
+      assert.strictEqual(res.source, 'UNRESOLVED', 'Source marked as UNRESOLVED');
+      pass('REG-CAT-05: Unresolved retailer ID returns name: null with isResolved: false (no Item (SKU) leak)');
     }
 
     // Test 12: parseAndValidateCart with multi-item realistic Meta catalogue order
@@ -317,10 +329,10 @@ async function runRegressionTestSuite() {
         internalNotes: tenant.internal_notes
       });
 
-      assert.strictEqual(result.isValid, true, 'Cart validation succeeds');
+      assert.strictEqual(result.isValid, true, 'Cart validation succeeds without strict flag');
       assert.strictEqual(result.cart.items.length, 3, 'All 3 items processed');
 
-      // Item 1: Built-in registry
+      // Item 1: Tenant metadata
       assert.strictEqual(result.cart.items[0].productName, 'Chicken Dum Biryani (Special)');
       assert.strictEqual(result.cart.items[0].productRetailerId, 'sezp6n6uee');
       assert.strictEqual(result.cart.items[0].isResolved, true);
@@ -330,13 +342,23 @@ async function runRegressionTestSuite() {
       assert.strictEqual(result.cart.items[1].productRetailerId, 'zfzb9a6ptg');
       assert.strictEqual(result.cart.items[1].isResolved, true);
 
-      // Item 3: Unresolved fallback
-      assert.strictEqual(result.cart.items[2].productName, 'Item (unknown_mystery_sku)');
+      // Item 3: Unresolved item (productName: null, isResolved: false)
+      assert.strictEqual(result.cart.items[2].productName, null);
       assert.strictEqual(result.cart.items[2].productRetailerId, 'unknown_mystery_sku');
       assert.strictEqual(result.cart.items[2].isResolved, false);
 
       assert.strictEqual(result.cart.subtotal, 1830.00, 'Subtotal accurate (2*800 + 1*180 + 1*50)');
-      pass('REG-CAT-06: parseAndValidateCart accurately normalizes resolved, tenant, and fallback items');
+
+      // Strict validation rejection test
+      const strictResult = parseAndValidateCart(rawPayload, {
+        restaurantId: tenant.id,
+        internalNotes: tenant.internal_notes,
+        strictResolution: true
+      });
+      assert.strictEqual(strictResult.isValid, false, 'Strict resolution rejects unverified item');
+      assert.strictEqual(strictResult.code, 'UNRESOLVED_CATALOG_ITEM');
+
+      pass('REG-CAT-06: parseAndValidateCart normalizes resolved items and strictly flags unverified items without Item (SKU)');
     }
 
     // Test 13: parseAndValidateCartAsync with async resolution & caching

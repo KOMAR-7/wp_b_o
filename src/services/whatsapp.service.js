@@ -61,9 +61,11 @@ function formatItemDisplayName(item) {
   const retailerId = (item.productRetailerId || '').trim();
 
   if (rawName && (!retailerId || rawName.toLowerCase() !== retailerId.toLowerCase())) {
-    return rawName;
+    if (!rawName.toLowerCase().startsWith('item (') || !rawName.endsWith(')')) {
+      return rawName;
+    }
   }
-  return retailerId ? `Item (${retailerId})` : (rawName || 'Item');
+  return rawName || 'Item';
 }
 
 /**
