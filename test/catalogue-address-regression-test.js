@@ -608,14 +608,14 @@ async function runRegressionTestSuite() {
       // Step 4: Customer declines to save address (one-time use)
       const consentRes = await handleIncomingMessage(tenant.id, custPhone, {
         messageType: 'interactive',
-        interactiveReply: { id: 'BTN_CONSENT_NO' }
+        interactiveReply: { id: 'BTN_CONSENT_NO', subType: 'button_reply' }
       });
       assert.strictEqual(consentRes.session.current_step, 'AWAITING_ORDER_TYPE', 'Step is AWAITING_ORDER_TYPE');
 
       // Step 5: Customer chooses Delivery
       const typeRes = await handleIncomingMessage(tenant.id, custPhone, {
         messageType: 'interactive',
-        interactiveReply: { id: 'BTN_ORDER_DELIVERY' }
+        interactiveReply: { id: 'BTN_ORDER_DELIVERY', subType: 'button_reply' }
       });
       assert.strictEqual(typeRes.session.current_step, 'AWAITING_CONFIRMATION', 'Step is AWAITING_CONFIRMATION');
 
