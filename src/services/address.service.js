@@ -196,6 +196,77 @@ function validateRoomNumber(roomNumber) {
 }
 
 /**
+ * Safely combines and normalizes multiple address components (e.g. customer-entered room/flat/building details,
+ * and WhatsApp location pin name/address) into a single clean string.
+ *
+ * Rules:
+ * 1. Normalizes whitespace, tabs, and newlines to a single space.
+ * 2. Normalizes separators, trimming leading/trailing commas and periods.
+ * 3. Prevents duplicate components (e.g. when WhatsApp sends identical strings in location.name and location.address).
+ * 4. Deduplicates identical or redundant comma-separated segments while preserving distinct details:
+ *    flat number, building name, landmark, street, locality, city, state, postal code.
+ * 5. Preserves similar but distinct elements (e.g. "Sector 14" vs "Sector 14A", "Maulana Azad Rd" vs "Maulana Azad Cross Rd").
+ *
+ * @param {...(string|null|undefined)} components - Address parts to combine
+ * @returns {string} Formatted, deduplicated address string
+ */
+function combineAddressComponents(...components) {
+  // 1. Flatten arrays if passed and filter valid string inputs
+  const rawParts = components
+    .flat()
+    .filter(c => typeof c === 'string' && c.trim().length > 0)
+    .map(c => {
+      // Normalize internal whitespace and strip outer punctuation
+      return c
+        .replace(/[\r\n\t]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .replace(/^[,\s\-\.\;]+|[,\s\-\.\;]+$/g, '')
+        .trim();
+    })
+    .filter(c => c.length > 0);
+
+  if (rawParts.length === 0) return '';
+
+  // 2. Component-level deduplication: drop components that are exact normalized duplicates
+  const uniqueParts = [];
+  const seenComponentKeys = new Set();
+
+  for (const part of rawParts) {
+    const key = part.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!key) continue;
+    if (seenComponentKeys.has(key)) {
+      continue; // Skip exact duplicate component
+    }
+    seenComponentKeys.add(key);
+    uniqueParts.push(part);
+  }
+
+  // 3. Segment-level extraction and deduplication:
+  // Split each unique part by commas into individual address segments
+  const finalSegments = [];
+  const seenSegmentKeys = new Set();
+
+  for (const part of uniqueParts) {
+    const segments = part
+      .split(/,\s*/)
+      .map(s => s.replace(/^[,\s\-\.\;]+|[,\s\-\.\;]+$/g, '').trim())
+      .filter(s => s.length > 0);
+
+    for (const seg of segments) {
+      const segKey = seg.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (!segKey) continue;
+
+      if (!seenSegmentKeys.has(segKey)) {
+        seenSegmentKeys.add(segKey);
+        finalSegments.push(seg);
+      }
+    }
+  }
+
+  return finalSegments.join(', ');
+}
+
+/**
  * Normalizes address into a consistent internal structure.
  *
  * @param {Object} params
@@ -221,15 +292,22 @@ function normalizeAddress({
     if (buildingName && roomNumber) {
       const cleanBuilding = buildingName.trim();
       const cleanRoom = roomNumber.trim();
-      const extra = formattedText ? `, Area: ${formattedText}` : '';
-      formattedText = `Room/Flat: ${cleanRoom}, Building: ${cleanBuilding}${extra}`;
+      formattedText = combineAddressComponents(
+        `Room/Flat: ${cleanRoom}`,
+        `Building: ${cleanBuilding}`,
+        formattedText
+      );
     } else if (!formattedText) {
       if (typeof latitude === 'number' && typeof longitude === 'number') {
         formattedText = `Pinned Location (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`;
       } else {
         formattedText = 'Shared Location Pin';
       }
+    } else {
+      formattedText = combineAddressComponents(formattedText);
     }
+  } else if (formattedText) {
+    formattedText = combineAddressComponents(formattedText);
   }
 
   return {
@@ -402,6 +480,7 @@ module.exports = {
   validateCoordinates,
   validateBuildingName,
   validateRoomNumber,
+  combineAddressComponents,
   normalizeAddress,
   findCustomerSavedAddresses,
   findSavedAddressById,

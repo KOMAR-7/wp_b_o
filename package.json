@@ -46,6 +46,7 @@
     "test:central:template": "node -r ./test/load-test-env.js test/central-order-notification-template-test.js",
     "test:guard": "node -r ./test/load-test-env.js test/test-guard-unit-test.js",
     "test:phase-a": "node -r ./test/load-test-env.js test/phase-a-focused-test.js",
+    "test:catalogue-address": "node -r ./test/load-test-env.js test/catalogue-address-regression-test.js",
     "test:r6:all": "node -r ./test/load-test-env.js test/r6-central-database-config-test.js && node -r ./test/load-test-env.js test/r6-central-webhook-test.js && node -r ./test/load-test-env.js test/r6-central-dispatch-test.js && node -r ./test/load-test-env.js test/r6-central-order-routing-test.js && node -r ./test/load-test-env.js test/r6-central-security-test.js && node -r ./test/load-test-env.js test/r6-central-template-approval-test.js && node -r ./test/load-test-env.js test/r6-central-admin-api-test.js && node -r ./test/load-test-env.js test/r6-7-staging-verification-test.js && node -r ./test/load-test-env.js test/r6-8-central-account-management-test.js && node -r ./test/load-test-env.js test/r6-9-exclude-central-from-restaurants-test.js",
     "admin:create": "node scripts/create-super-admin.js",
     "db:seed": "node prisma/seed.js"

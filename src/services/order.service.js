@@ -21,6 +21,7 @@ const {
   buildCentralCustomerDecisionPayload
 } = require('./whatsapp.service');
 const { getOwnerConsent, parseInternalNotes } = require('./admin-restaurant.service');
+const { combineAddressComponents } = require('./address.service');
 const { verifySignedOwnerCallback } = require('../utils/callback-signer');
 const { isTemplateApproved, SUPPORTED_TEMPLATES } = require('./template-config.service');
 
@@ -114,9 +115,18 @@ function buildOrderSummary({
     const lineTotalCents = qty * priceCents;
     calculatedSubtotalCents += lineTotalCents;
 
+    const rawName = typeof item.productName === 'string' ? item.productName.trim() : '';
+    const retailerId = typeof item.productRetailerId === 'string' ? item.productRetailerId.trim() : '';
+    const isPureRetailerId = rawName && retailerId && rawName.toLowerCase() === retailerId.toLowerCase();
+    const displayName = (isPureRetailerId || !rawName)
+      ? (retailerId ? `Item (${retailerId})` : 'Item')
+      : rawName;
+    const isResolved = item.isResolved !== false && !isPureRetailerId && Boolean(rawName);
+
     return {
-      productRetailerId: item.productRetailerId,
-      productName: item.productName || item.productRetailerId,
+      productRetailerId: retailerId,
+      productName: displayName,
+      isResolved,
       quantity: qty,
       unitPrice: fromIntegerCents(priceCents),
       lineTotal: fromIntegerCents(lineTotalCents),
@@ -126,7 +136,7 @@ function buildOrderSummary({
 
   const subtotal = fromIntegerCents(calculatedSubtotalCents);
   const currency = cart.currency || 'INR';
-  const deliveryAddressText = orderType === 'DELIVERY' ? address.addressText.trim() : null;
+  const deliveryAddressText = orderType === 'DELIVERY' ? combineAddressComponents(address.addressText) : null;
   const isDelivery = orderType === 'DELIVERY';
   const displayCustomer = customerName ? customerName.trim() : null;
 

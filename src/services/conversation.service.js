@@ -18,13 +18,15 @@
 const crypto = require('crypto');
 const prisma = require('../config/database');
 const logger = require('../utils/logger');
-const { parseAndValidateCart } = require('../parsers/cart-parser');
+const { parseAndValidateCart, parseAndValidateCartAsync } = require('../parsers/cart-parser');
+const { decryptToken } = require('../utils/crypto');
 const { safeParseCoordinate } = require('../parsers/webhook-parser');
 const {
   validateTextAddress,
   validateCoordinates,
   validateBuildingName,
   validateRoomNumber,
+  combineAddressComponents,
   normalizeAddress,
   findCustomerSavedAddresses,
   findSavedAddressById,
@@ -89,12 +91,20 @@ async function processIncomingCart(restaurantId, customerPhone, rawOrderPayload,
   // 1. Defensively validate and normalize the incoming cart payload with catalogue resolution
   const restaurant = await prisma.restaurant.findUnique({
     where: { id: restaurantId },
-    select: { internal_notes: true, name: true }
+    select: { id: true, internal_notes: true, name: true, access_token_encrypted: true }
   });
 
-  const validation = parseAndValidateCart(rawOrderPayload, {
+  let accessToken = null;
+  if (restaurant?.access_token_encrypted) {
+    try {
+      accessToken = decryptToken(restaurant.access_token_encrypted);
+    } catch (_) {}
+  }
+
+  const validation = await parseAndValidateCartAsync(rawOrderPayload, {
     restaurantId,
-    internalNotes: restaurant?.internal_notes
+    internalNotes: restaurant?.internal_notes,
+    accessToken
   });
   if (!validation.isValid) {
     logger.warn('Cart validation rejected incoming catalogue payload', {
@@ -1386,8 +1396,7 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
           const tempLoc = currentState.tempLocation || {};
           const lat = typeof tempLoc.latitude === 'number' ? tempLoc.latitude : null;
           const lng = typeof tempLoc.longitude === 'number' ? tempLoc.longitude : null;
-          const extraArea = [tempLoc.name, tempLoc.address].filter(Boolean).join(', ');
-          const formattedAddress = extraArea ? `${details}, ${extraArea}` : details;
+          const formattedAddress = combineAddressComponents(details, tempLoc.name, tempLoc.address);
 
           const normalized = normalizeAddress({
             source: 'LOCATION_PIN',
@@ -1648,7 +1657,7 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
         const area = textBody.trim();
         if (area.length >= 1) {
           const { room = '', building = '', street = '' } = currentState.manualAddress || {};
-          const formattedAddress = [room, building, street, area].filter(Boolean).join(', ');
+          const formattedAddress = combineAddressComponents(room, building, street, area);
 
           const normalized = normalizeAddress({
             source: 'MANUAL',
@@ -1811,7 +1820,7 @@ async function handleIncomingMessage(restaurantId, customerPhone, event) {
           const roomNumber = roomCheck.roomNumber;
           const latitude = tempLoc.latitude;
           const longitude = tempLoc.longitude;
-          const extraArea = tempLoc.address || tempLoc.name || '';
+          const extraArea = combineAddressComponents(tempLoc.name, tempLoc.address);
 
           const normalized = normalizeAddress({
             source: 'LOCATION_PIN',

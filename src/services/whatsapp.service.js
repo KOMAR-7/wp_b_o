@@ -14,6 +14,7 @@ const config = require('../config/env');
 const logger = require('../utils/logger');
 const { decryptToken } = require('../utils/crypto');
 const { generateSignedOwnerCallback } = require('../utils/callback-signer');
+const { combineAddressComponents } = require('./address.service');
 
 const META_GRAPH_VERSION = 'v21.0';
 const DEFAULT_TIMEOUT_MS = 10000;
@@ -45,6 +46,24 @@ function sanitizeTemplateParam(value, fallback = 'N/A', maxLength = 1024) {
     str = String(fallback).trim() || 'N/A';
   }
   return str.slice(0, maxLength);
+}
+
+/**
+ * Resolves a safe display name for an order line item.
+ * Guarantees a raw catalogue product_retailer_id is never displayed as the product name.
+ *
+ * @param {Object} item
+ * @returns {string} Human-readable item name or clear fallback
+ */
+function formatItemDisplayName(item) {
+  if (!item || typeof item !== 'object') return 'Item';
+  const rawName = (item.productName || item.name || item.title || '').trim();
+  const retailerId = (item.productRetailerId || '').trim();
+
+  if (rawName && (!retailerId || rawName.toLowerCase() !== retailerId.toLowerCase())) {
+    return rawName;
+  }
+  return retailerId ? `Item (${retailerId})` : (rawName || 'Item');
 }
 
 /**
@@ -111,7 +130,7 @@ function buildOwnerNotificationPayload({
 
   // 4. Delivery Address {{4}}
   const rawDeliveryAddress = (isDelivery && order.address_snapshot && String(order.address_snapshot).trim())
-    ? String(order.address_snapshot).trim()
+    ? combineAddressComponents(String(order.address_snapshot).trim())
     : (isDelivery ? 'Address not provided' : 'Takeaway (Self-Pickup)');
   const deliveryAddress = sanitizeTemplateParam(
     rawDeliveryAddress,
@@ -123,7 +142,7 @@ function buildOwnerNotificationPayload({
   const rawFormattedItems = items.length > 0
     ? items.map(item => {
         const qty = item.quantity || 1;
-        const name = (item.productName || item.name || item.title || item.productRetailerId || 'Item').trim();
+        const name = formatItemDisplayName(item).trim();
         return `${qty}x ${name}`;
       }).join(', ')
     : '1x Order Items';
@@ -184,7 +203,7 @@ function buildOwnerNotificationPayload({
   const formattedInteractiveItems = items.length > 0
     ? items.map(item => {
         const qty = item.quantity || 1;
-        const name = item.productName || item.name || item.title || item.productRetailerId || 'Item';
+        const name = formatItemDisplayName(item);
         const priceStr = (typeof item.unitPrice === 'number' || (typeof item.unitPrice === 'string' && item.unitPrice))
           ? ` @ ${currencySymbol}${Number(item.unitPrice).toFixed(2)}`
           : '';
@@ -279,7 +298,7 @@ function buildCustomerDecisionNotificationPayload({ order, decision, restaurantN
     bodyText += `🥡 *Fulfilment:* ${fulfilmentText}\n`;
 
     if (isDelivery && order.address_snapshot) {
-      bodyText += `📍 *Delivery Address:* ${order.address_snapshot}\n`;
+      bodyText += `📍 *Delivery Address:* ${combineAddressComponents(order.address_snapshot)}\n`;
     }
 
     const items = Array.isArray(order.items) ? order.items : [];
@@ -288,7 +307,7 @@ function buildCustomerDecisionNotificationPayload({ order, decision, restaurantN
       bodyText += '*Order Details:*\n';
       for (const item of items) {
         const qty = item.quantity;
-        const name = item.productName || item.productRetailerId || 'Item';
+        const name = formatItemDisplayName(item);
         const unitPrice = typeof item.unitPrice === 'number' ? item.unitPrice.toFixed(2) : item.unitPrice;
         bodyText += `• ${qty}x ${name} @ ${currencySymbol}${unitPrice}\n`;
       }

@@ -7,7 +7,7 @@
  * Rejects corrupt or malformed cart data without silent coercion.
  */
 
-const { resolveMenuItemName } = require('../services/catalog.service');
+const { resolveMenuItemName, resolveMenuItemNameAsync } = require('../services/catalog.service');
 
 class CartValidationError extends Error {
   constructor(code, message, details = {}) {
@@ -265,7 +265,10 @@ function parseAndValidateCart(rawOrder, options = {}) {
       };
     }
 
-    const displayName = resolvedName || (typeof item.name === 'string' && item.name.trim()) || retailerId;
+    const fallbackName = `Item (${retailerId})`;
+    const displayName = resolvedName || (typeof item.name === 'string' && item.name.trim() && item.name.trim().toLowerCase() !== retailerId.toLowerCase()
+      ? item.name.trim()
+      : (options.restaurantId || options.useFriendlyFallback ? fallbackName : retailerId));
 
     normalizedItems.push({
       productRetailerId: retailerId,
@@ -296,9 +299,95 @@ function parseAndValidateCart(rawOrder, options = {}) {
   };
 }
 
+/**
+ * Asynchronously parses, validates, and normalizes an incoming WhatsApp catalogue order.
+ * Enhances unresolved catalogue items using async Meta Graph API lookup when credentials are provided.
+ *
+ * @param {Object} rawOrder - Raw order payload
+ * @param {Object} [options={}] - Validation options
+ * @param {string} [options.restaurantId] - Restaurant UUID
+ * @param {string} [options.internalNotes] - Restaurant internal_notes string
+ * @param {string} [options.accessToken] - Decrypted Meta access token
+ * @param {Function} [options.menuResolverAsync] - Optional custom async resolver
+ * @returns {Promise<{isValid: boolean, cart?: Object, code?: string, error?: string}>}
+ */
+async function parseAndValidateCartAsync(rawOrder, options = {}) {
+  // 1. Run structural & decimal validation
+  const syncValidation = parseAndValidateCart(rawOrder, options);
+  if (!syncValidation.isValid) {
+    return syncValidation;
+  }
+
+  const normalizedItems = [];
+  const catalogId = syncValidation.cart.catalogId;
+
+  // 2. Resolve items asynchronously
+  for (let i = 0; i < syncValidation.cart.items.length; i++) {
+    const item = syncValidation.cart.items[i];
+    const rawItem = (syncValidation.cart.rawOrderSnapshot?.product_items || [])[i] || {};
+
+    if (item.isResolved) {
+      normalizedItems.push(item);
+      continue;
+    }
+
+    const retailerId = item.productRetailerId;
+    let resolvedName = null;
+    let isResolved = false;
+
+    if (typeof options.menuResolverAsync === 'function') {
+      const res = await options.menuResolverAsync({
+        restaurantId: options.restaurantId,
+        catalogId,
+        productRetailerId: retailerId,
+        rawItem,
+        internalNotes: options.internalNotes,
+        accessToken: options.accessToken
+      });
+      if (res && res.name) {
+        resolvedName = res.name;
+        isResolved = Boolean(res.isResolved);
+      }
+    } else {
+      const res = await resolveMenuItemNameAsync({
+        restaurantId: options.restaurantId,
+        catalogId,
+        productRetailerId: retailerId,
+        rawItem,
+        internalNotes: options.internalNotes,
+        accessToken: options.accessToken
+      });
+      if (res && res.name) {
+        resolvedName = res.name;
+        isResolved = Boolean(res.isResolved);
+      }
+    }
+
+    const fallbackName = `Item (${retailerId})`;
+    const displayName = resolvedName || (typeof rawItem.name === 'string' && rawItem.name.trim() && rawItem.name.trim().toLowerCase() !== retailerId.toLowerCase()
+      ? rawItem.name.trim()
+      : fallbackName);
+
+    normalizedItems.push({
+      ...item,
+      productName: displayName,
+      isResolved
+    });
+  }
+
+  return {
+    isValid: true,
+    cart: {
+      ...syncValidation.cart,
+      items: normalizedItems
+    }
+  };
+}
+
 module.exports = {
   CartValidationError,
   parseAndValidateCart,
+  parseAndValidateCartAsync,
   toIntegerCents,
   fromIntegerCents,
   isPositiveInteger
