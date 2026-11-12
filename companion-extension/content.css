@@ -1,0 +1,71 @@
+/* RestPro WhatsApp Web Catalogue Companion Styling */
+.restopro-floating-pill {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 999999;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background-color: #00a884;
+  color: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 24px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.2s ease-in-out;
+}
+
+.restopro-floating-pill:hover {
+  background-color: #008f6f;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+}
+
+.restopro-floating-pill.syncing {
+  background-color: #f39c12;
+  cursor: wait;
+}
+
+.restopro-floating-pill .restopro-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.restopro-toast {
+  position: fixed;
+  bottom: 80px;
+  right: 24px;
+  z-index: 1000000;
+  max-width: 360px;
+  padding: 12px 18px;
+  border-radius: 8px;
+  background-color: #111b21;
+  color: #e9edef;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  border-left: 4px solid #00a884;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: all 0.25s ease-in-out;
+  pointer-events: none;
+}
+
+.restopro-toast.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.restopro-toast.error {
+  border-left-color: #ea4335;
+}
+
+.restopro-toast.warning {
+  border-left-color: #f39c12;
+}

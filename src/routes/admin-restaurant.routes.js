@@ -14,6 +14,9 @@ const {
   handleRetryOutbox
 } = require('../controllers/admin-restaurant.controller');
 const {
+  handleGetRestaurantSyncToken
+} = require('../controllers/catalog-sync.controller');
+const {
   handleGetUnassignedRestaurants,
   handleAssignRestaurant,
   handleUnassignRestaurant
@@ -37,6 +40,9 @@ router.put('/:restaurantId/central-account', handleAssignRestaurant);
 
 // DELETE /api/admin/restaurants/:restaurantId/central-account — Remove central account assignment
 router.delete('/:restaurantId/central-account', handleUnassignRestaurant);
+
+// GET /api/admin/restaurants/:id/sync-token — Get restaurant catalogue sync token for browser companion
+router.get('/:id/sync-token', handleGetRestaurantSyncToken);
 
 // GET /api/admin/restaurants/:id — Get full restaurant profile, subscriptions & payments
 router.get('/:id', handleGetRestaurantById);

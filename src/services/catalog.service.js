@@ -82,6 +82,34 @@ function clearCatalogCache() {
 }
 
 /**
+ * Evicts a specific cached product for a restaurant.
+ *
+ * @param {string} [restaurantId='global']
+ * @param {string} productRetailerId
+ */
+function evictCachedProduct(restaurantId = 'global', productRetailerId = '') {
+  if (!productRetailerId) return;
+  const targetTenant = restaurantId || 'global';
+  const key = `${targetTenant}:${productRetailerId.trim()}`;
+  tenantCatalogCache.delete(key);
+}
+
+/**
+ * Evicts all cached products for a specific restaurant tenant.
+ *
+ * @param {string} [restaurantId='global']
+ */
+function evictTenantCatalogCache(restaurantId = 'global') {
+  const targetTenant = restaurantId || 'global';
+  const prefix = `${targetTenant}:`;
+  for (const key of tenantCatalogCache.keys()) {
+    if (key.startsWith(prefix)) {
+      tenantCatalogCache.delete(key);
+    }
+  }
+}
+
+/**
  * Registers custom catalogue items for a specific restaurant or globally.
  *
  * @param {string} [restaurantId='global']
@@ -420,6 +448,8 @@ module.exports = {
   fetchMetaCatalogProduct,
   getCachedProduct,
   setCachedProduct,
+  evictCachedProduct,
+  evictTenantCatalogCache,
   clearCatalogCache,
   getRestaurantCatalog,
   registerTenantCatalog,

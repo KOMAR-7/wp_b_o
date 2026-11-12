@@ -691,11 +691,16 @@ async function updateRestaurant(id, updates, adminId, options = {}) {
       };
     }
 
+    const existingParsed = parseInternalNotes(existing.internal_notes);
     const baseNotes = updates.internal_notes !== undefined
       ? parseInternalNotes(updates.internal_notes).textNotes
-      : parseInternalNotes(existing.internal_notes).textNotes;
+      : existingParsed.textNotes;
 
-    updateData.internal_notes = formatInternalNotes(baseNotes, updatedConsent);
+    const catalogToPreserve = updates.menu_catalog !== undefined
+      ? updates.menu_catalog
+      : existingParsed.menuCatalog;
+
+    updateData.internal_notes = formatInternalNotes(baseNotes, updatedConsent, catalogToPreserve);
   }
 
   const updated = await prisma.$transaction(async (tx) => {

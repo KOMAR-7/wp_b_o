@@ -13,6 +13,7 @@ const adminDashboardRoutes = require('./routes/admin-dashboard.routes');
 const adminSystemRoutes = require('./routes/admin-system.routes');
 const adminAuditLogRoutes = require('./routes/admin-audit-logs.routes');
 const adminCentralAccountRoutes = require('./routes/admin-central-account.routes');
+const catalogSyncRoutes = require('./routes/catalog-sync.routes');
 const prisma = require('./config/database');
 const logger = require('./utils/logger');
 
@@ -98,6 +99,9 @@ app.use('/api/admin/system', adminSystemRoutes);
 app.use('/api/admin/audit-logs', adminAuditLogRoutes);
 app.use('/api/admin/central-account', adminCentralAccountRoutes);
 app.use('/api/admin/central-accounts', adminCentralAccountRoutes);
+
+// WhatsApp Web Companion Catalogue Synchronization endpoints
+app.use('/api/catalog', catalogSyncRoutes);
 
 // Super Admin Frontend Panel
 app.get('/admin', (req, res) => {
